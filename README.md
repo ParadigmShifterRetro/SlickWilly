@@ -6,6 +6,14 @@ Compile with sjasmplus v1.20.3
 
 sjasmplus.exe --sym=out.sym --syntax=f --raw=out.bin swedit.asm
 
+To run on a speccy emulator:
+
+CLEAR 24575
+
+<upload out.bin to address 24576 in emulator>
+
+RANDOMIZE USR 32768
+
 ; Original game by Matthew Smith (C) Bug Byte 1983, (C) 1983 Software Projects
 ; Engine Rewrite (C) 2010-2024 ParadigmShifter (aka Paradigm Shifter on WoS): https://spectrumcomputing.co.uk/forums/memberlist.php?mode=viewprofile&u=2484
 ; Updated animation/sprites: (C) 2024 gabriele amore (Spectrum Computing forum) https://spectrumcomputing.co.uk/forums/memberlist.php?mode=viewprofile&u=959
