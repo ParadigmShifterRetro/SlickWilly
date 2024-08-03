@@ -57,13 +57,13 @@ FALSE	EQU 0
 SILLYSPEED EQU FALSE;TRUE
 DBG_OCCUPIED EQU FALSE
 
-SPLASH	EQU TRUE
+SPLASH	EQU FALSE;TRUE
 
-ROLLINGDEMO	EQU  TRUE
+ROLLINGDEMO	EQU  FALSE
 
 DOUBLEUPTUNE	EQU FALSE ; TRUE sounds bad lol
 
-PLAYTUNE	EQU TRUE
+PLAYTUNE	EQU FALSE;TRUE
 	IF DOUBLEUPTUNE
 TUNETICKINITIAL	EQU 2;5
 	ELSE
@@ -81,7 +81,7 @@ GAMEOVERSTATE		EQU 1
 GAVEOVERINPROGRESS	EQU 2
 
 	IF	!FPS25
-TIMING		EQU FALSE;TRUE
+TIMING		EQU TRUE
 	ELSE
 TIMING		EQU FALSE
 	ENDIF
@@ -90,7 +90,7 @@ BEAMFLICKERTEST	EQU FALSE
 
 AIRTICKS	EQU 16
 
-GUARDIANSERASEATTRIBS	EQU	TRUE;FALSE
+GUARDIANSERASEATTRIBS	EQU	FALSE
 
 FIXFINALIMAGE	EQU FALSE
 
@@ -625,18 +625,19 @@ drawnextguardian:
 
 donedrawguardians:
 
+	IF TIMING
+	SETBORDER 4
+	ENDIF
+	
 	; draw the conveyors if it's an odd frame
 	ld a, (frame_counter)
 	and 3
 	jr nz, .doneconveyordraw
 
-	IF TIMING
-	SETBORDER 4
-	ENDIF
-	
 	ld hl, conveyorlist
 	exx
-	ld b, 0 ; always < 255 count for ldir
+	;ld b, 0 ; always < 255 count for ldir
+	ld b, a ; A is 0 since we didn't take the jump above
 
 	exx
 .conveyorloop
@@ -1643,8 +1644,6 @@ air_down:
 	ld (hl), a
 	or a
 	ret nz
-	ld a, b
-	dec a
 	ld a, b
 	dec a
 	ld (air_column), a
