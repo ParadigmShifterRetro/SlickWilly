@@ -160,6 +160,36 @@ PUTCHAR	EQU sputprcharlinear;put8x8prchar;put8x8char;
 	pop hl
 	ENDM
 
+	MACRO ADDTOREDRAWCELLSLIST
+	exx
+	rlca ; *2
+	ld l, a
+	ld c, (hl)
+	inc l
+	ld b, (hl)
+	ex de, hl
+	ld (hl), b
+	inc l
+	ld (hl), c
+	inc l
+	exx
+	push hl
+	ld bc, ATTRIBS-collision_map
+	add hl, bc
+	ATTRIBSTOSCR h
+	exx
+	ld (hl), a
+	inc l
+	exx
+	ld a, l
+	exx
+	ld (hl), a
+	inc l
+	ex de, hl
+	exx
+	pop hl
+	ENDM
+
 	; B row
 	; C column. Both of those in attrib cells
 	MACRO ROWCOLTOSCRADDR
@@ -530,8 +560,30 @@ mainloop:
 
 	jr .nextcellerase
 
-
 .donecellerase
+	ld hl, redrawcellslist
+.nextcellredraw
+	ld a, (hl)
+	or a
+	jr z, .doneerasewilly
+	inc l
+	ld c, (hl)
+	ld b, a
+	inc l
+	ld d, (hl)
+	inc l
+	ld e, (hl)
+	inc l
+
+	REPT 8, idx
+	ld a, (bc)
+	ld (de), a
+	IF idx < 7
+	inc c
+	inc d
+	ENDIF
+	ENDR
+	jr .nextcellredraw
 
 .doneerasewilly
 
@@ -2332,6 +2384,9 @@ parse_unpacked_level:
 	ld hl, erasecellslist
 	ld (hl), a
 
+	ld hl, redrawcellslist
+	ld (hl), a
+
 	ld hl, collision_map
 	ld de, collision_map+1
 	ld (hl), a
@@ -2420,7 +2475,7 @@ parse_unpacked_level:
 	ex de, hl
 
 	ld a, (hl); border colour
-.brkhere
+
 	out (#FE), a
 	ld (bdr_colour), a
 
@@ -3945,6 +4000,10 @@ put_level_name_unpacked:
 	DISPLAY "put_level_name_unpacked size: ",/A, $-put_level_name_unpacked
 
 update_willy:
+	ld h, level_tiles/256
+	ld de, redrawcellslist
+	exx
+
 	ld de, erasecellslist
 	ld hl, (willy_colpos)
 	ld bc, collision_map
@@ -3955,8 +4014,14 @@ update_willy:
 	jr nz, .tlnotblank
 	
 	ADDTOERASECELLSLIST
+	jp .topright
 
 .tlnotblank
+
+	ADDTOREDRAWCELLSLIST
+
+.topright
+
 	inc l
 
 	ld a, (hl)
@@ -3964,6 +4029,12 @@ update_willy:
 	jr nz, .trnotblank
 	
 	ADDTOERASECELLSLIST
+	jp .midleft
+
+.trnotblank
+	ADDTOREDRAWCELLSLIST
+
+.midleft
 
 	ld a, 31
 	add l
@@ -3971,15 +4042,18 @@ update_willy:
 	jr nc, .addrokmid
 	inc h
 .addrokmid
-.trnotblank
 
 	ld a, (hl)
 	or a
 	jr nz, .midlnotblank
 	
 	ADDTOERASECELLSLIST
+	jp .midright
 
 .midlnotblank
+	ADDTOREDRAWCELLSLIST
+
+.midright
 	inc l
 
 	ld a, (hl)
@@ -3987,11 +4061,31 @@ update_willy:
 	jr nz, .midrnotblank
 	
 	ADDTOERASECELLSLIST
+	jp .done2rows
+
 .midrnotblank
+	ADDTOREDRAWCELLSLIST
+
+.done2rows
 	xor a
 	ld (de), a
 
+	exx
+	ld (de), a
+
 update_willy_pos:
+	call read_keyboard
+	ld hl, willy_xpos
+	ld a, (hl)
+	add c
+	cp 8
+	jr c, .doneupatepos
+	cp 240
+	jr nc, .doneupatepos
+
+	ld (hl), a
+.doneupatepos
+
 	ld d, gfx_gnewwilly0/256
 
 	ld a, (willy_facing)
@@ -4009,7 +4103,22 @@ update_willy_pos:
 
 	ld (draw_willy_2rows+1), de
 
+.brkhere
 	ld hl, (willy_colpos)
+	ld a, l
+	and ~31
+	ld l, a
+
+	ld a, (willy_xpos)
+	and ~7
+	rrca
+	rrca
+	rrca
+	or l
+	ld l, a
+
+	ld (willy_colpos), hl
+
 	ld de, ATTRIBS
 	add hl, de
 	ATTRIBSTOSCR h
@@ -4026,6 +4135,44 @@ update_willy_pos:
 	ld (willyrow1addr+1), hl
 
 	ret
+
+; at exit, C contains 1 if we pressed right and -1 if we pressed left
+read_keyboard:
+	; Read these ports to scan keyboard
+	; bit N (0-based) is clear if the key is being pressed
+	; #FE - SHIFT, Z, X, C, & V
+	; #FD - A, S, D, F, & G
+	; #FB - Q, W, E, R, & T
+	; #F7 - 1, 2, 3, 4, & 5
+	; #EF - 0, 9, 8, 7, & 6
+	; #DF - P, O, I, U, & Y
+	; #BF - ENTER, L, K, J, & H
+	; #7F - SPACE, FULL-STOP, M, N, & B
+	; ld a, port
+	; in a, (#FE)
+	; to do the read of the port
+
+	ld bc, 0
+
+	; are we pressing W?
+	ld a, #FB
+	in a, (#FE)
+	bit 1, a
+	jr nz, .notpressingW
+	inc c
+.notpressingW
+	; are we pressing Q?
+	bit 0, a
+	jr nz, .notpressingQ
+	dec c
+.notpressingQ
+	ld a, c
+	or a
+	ret z ; not moving
+	ld hl, willy_facing
+	ld (hl), c
+	ret
+
 
 ; A: starting cell for solar
 init_solar:
@@ -9663,6 +9810,13 @@ guardian7:
 
 tokenise_buff BLOCK 64 
 
+; format of this list
+; WORD gfx (big endian)
+; WORD scraddress
+redrawcellslist	BLOCK 4*6+1
+
+	DISPLAY "Gap before tbl_rows: ", /A, tbl_rows-$
+
 	ALIGN 256
 tbl_rows
 	REPT 24, row
@@ -9695,14 +9849,6 @@ bdr_colour	db 0
 tune_offset		db 0
 tune_tick		db TUNETICKINITIAL
 tune_play		db 1
-
-
-
-;	ALIGN 32
-;willy_xpos	db 0
-;willy_ypos	db 0
-;willy_oldpos db 0, 0
-
 
 	IF TUNE3LOOPSTHEN2
 tune_numloops db 2
