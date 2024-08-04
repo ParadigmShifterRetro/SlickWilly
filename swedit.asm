@@ -254,7 +254,7 @@ PUTCHAR	EQU sputprcharlinear;put8x8prchar;put8x8char;
 	ENDM
 
 	MACRO XY _x_, _y_
-	dw _y_*32+_x_
+	dw (_y_)*32+_x_
 	ENDM
 
 	MACRO DRAWSPRITE2LINES
@@ -463,6 +463,8 @@ mainloop:
 	SETBORDER 1
 	ENDIF
 
+	IF 0
+
 	ld hl, willy_oldpos
 	ld a, (hl)
 	and ~7
@@ -478,6 +480,8 @@ mainloop:
 	rrca
 	ld b, a
 	call erase_willy
+
+	ENDIF
 
 .doneerasewilly
 
@@ -621,6 +625,14 @@ drawnextguardian:
 	ld a, d
 	and 7
 	jp z, draw_horz_guardian
+
+	; lookup how many rows we want to draw in top and bottom cell and stash in the alt register set (in BC probs)
+	; can use B'C' before I set them
+	; 1 reg needs to point to the table, so probs D'E'. D' is constant in the loop
+	; HL could point to one of the addresses and JP (HL)
+	; JP (IX) is faster than a normal jump too (8T) so can use that as well to jump to the other routine.
+	; Just set IX and H'L' outside the loop
+
 	jp draw_vert_guardian
 
 donedrawguardians:
@@ -738,6 +750,11 @@ donedrawguardians:
 	jp nc, dogameoverattribs
 .drawwillythisframe
 
+drawwilly:
+	jp draw_willy_2rows
+
+	IF 0
+
 	ld hl, willy_xpos
 	ld a, (hl)
 	ld d, a
@@ -840,6 +857,8 @@ sprite16x16raKnowAddr:
 	inc h								; 4T
 	ENDIF
 	ENDR								;
+
+	ENDIF
 	
 donedrawwilly:
 
@@ -1946,105 +1965,6 @@ put_strz:
 	pop hl
 	jr put_strz
 
-; HL: tokenised string address
-; DE: buffer to expand into
-; at exit-
-; C: proportional string length
-expand_measurepr_tokenised_string:
-.prelude
-	ld c, 0
-.body
-	ld ix, ('A' - 'a')&255 ; IXL: Camel Case adjustment. IXH: 0 (to set not capitals, which happens most of the time)
-	ld a, (hl)
-	or a ; first token TOKEN_LEADINGTHE?
-	jr z, .leadingthe
-.loop
-	ld a, (hl)
-	inc hl
-	cp 31
-	jr nz, .not_eos
-	dec c ; no need for letter separator at EOS
-	xor a
-	ld (de), a
-	ret
-.not_eos
-	or a
-	jr nz, .notspace
-
-	ld a, ' '
-	call add_pr_letterwidth
-	jr .body
-
-.notspace
-	cp 27
-	jr nc, .isspecial
-	add 'a'-1
-	add ixl ; adjust for Camel Case if required
-	ld ixl, ixh ; set to lowercase again now
-.readytoput
-
-	call add_pr_letterwidth
-	jr .loop
-
-.leadingthe
-	inc hl
-	push hl
-	ld hl, strThe
-	jr .docompound
-.isspecial
-
-	sub TOKEN_QUESTIONMARK
-	ld b, '?'
-	jr z, .donedecode
-	dec a ; TOKEN_APOSTROPHE?
-	ld b, "'"
-	jr z, .donedecode
-
-	push hl
-	ld hl, strOfThe
-	dec a ; TOKEN_MEETSTHE?
-	jr z, .docompound
-	ld l, strMeetsThe&255 ; ok cos strMeetsThe is aligned to not cross a page
-.docompound
-	ld a, (hl)
-	and 127 ; mask out terminator bit
-
-	call add_pr_letterwidth
-	bit 7, (hl)
-	inc hl
-	jr z, .docompound
-
-	pop hl
-	jr .body
-
-.donedecode
-	ld a, b
-	jr .readytoput
-
-add_pr_letterwidth:
-	ld (de), a
-	inc de
-
-	; get width
-	exx
-	rlca ; char*2
-	ld bc, FONTBASE
-	ld h, c ; 0
-	ld l, a
-	add hl, hl ; char*4
-	add hl, hl ; char*8
-	add hl, bc
-	ld a, (hl)
-	and 15 ; remove flags
-	inc a ; account for letter spacing
-	exx
-
-	add c
-	ld c, a
-	ret
-
-	DISPLAY "expand_measurepr_tokenised_string size: ", /A, $-expand_measurepr_tokenised_string
-
 ; B: row (0-191)
 ; C: column (0-255)
 put_string_at:
@@ -2393,29 +2313,35 @@ parse_unpacked_level:
 
 	inc hl
 
+	ld de, willy_colpos
+
+	ldi
+
 	ld a, (hl)
-	rlca
-	rlca
-	rlca
-	ld (willy_xpos), a
-	ld (willy_oldpos), a
 	inc hl
-	ld a, (hl)
+
 	ld c, 1
-	bit 4, a
+	bit 1, a
 	jr z, .donewillyfacing
 	dec c
 	dec c
 .donewillyfacing
-	and 15
+	and 1 ; put in range 0-511 so collision map offset
+	ld (de), a
+
+	ld a, (willy_colpos)
+	and 31
 	rlca
 	rlca
-	rlca
-	ld (willy_ypos), a
-	ld (willy_oldpos+1), a
+	rlca ; multiply by 8 to get willy_xpos
+	ld (willy_xpos), a
+
 	ld a, c
 	ld (willy_facing), a
-	inc hl
+
+	exx
+	call update_willy_pos
+	exx
 
 	ld de, exit_xpos
 	ld bc, 3
@@ -2637,6 +2563,9 @@ parse_unpacked_level:
 	ld a, (willy_xpos)
 	add 3
 	ld (willy_xpos), a
+	exx
+	call update_willy_pos
+	exx
 	inc hl
 	jr .nextbrush
 .notgameover
@@ -3962,6 +3891,42 @@ put_level_name_unpacked:
 
 	DISPLAY "put_level_name_unpacked size: ",/A, $-put_level_name_unpacked
 
+update_willy_pos:
+	ld d, gfx_gnewwilly0/256
+
+	ld a, (willy_facing)
+	dec a
+	jr z, .setanimframe
+	inc d
+
+.setanimframe
+	ld a, (willy_xpos)
+	and 7
+	rrca
+	rrca
+	rrca ; *32
+	ld e, a
+
+	ld (draw_willy_2rows+1), de
+
+	ld hl, (willy_colpos)
+	ld de, ATTRIBS
+	add hl, de
+	ATTRIBSTOSCR h
+	ld h, a
+
+	ld (willyrow0addr+1), hl
+
+	ld hl, (willy_colpos)
+	ld de, ATTRIBS+32
+	add hl, de
+	ATTRIBSTOSCR h
+	ld h, a
+
+	ld (willyrow1addr+1), hl
+
+	ret
+
 ; A: starting cell for solar
 init_solar:
 	MEMCLEAR solar_power_erase0, SOLAR_DATA_LEN
@@ -4272,6 +4237,63 @@ erase8x8aKnowAddr:
 
 	ld (hl), a
 	ret
+
+draw_willy_2rows:
+	ld sp, 0 ; SMC
+
+willyrow0addr:
+	ld hl, 0 ; SMC
+
+	REPT 4, idx
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+	inc h								; 4T	54T
+	pop de								; 10T	64T
+	ld a, (hl)							; 7T	71T
+	or d								; 4T	75T
+	ld (hl), a							; 7T	82T
+	dec l								; 4T	86T
+	ld a, (hl)							; 7T	93T
+	or e								; 4T	97T
+	ld (hl), a							; 7T	104T
+	IF idx < 3
+	inc h								; 4T	108T
+	ENDIF
+	ENDR								; 14T + 108T*4 = 446T
+
+willyrow1addr:
+	ld hl, 0 ; SMC
+
+	REPT 4, idx
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+	inc h								; 4T	54T
+	pop de								; 10T	64T
+	ld a, (hl)							; 7T	71T
+	or d								; 4T	75T
+	ld (hl), a							; 7T	82T
+	dec l								; 4T	86T
+	ld a, (hl)							; 7T	93T
+	or e								; 4T	97T
+	ld (hl), a							; 7T	104T
+	IF idx < 3
+	inc h								; 4T	108T
+	ENDIF
+	ENDR								; 14T + 108T*4 = 446T
+
+	jp donedrawwilly
 
 draw_horz_guardian:
 
@@ -9557,6 +9579,10 @@ bgtileidx		db 0
 tile_dist_table:
 	TILEDISTTBL
 
+willy_colpos	dw 0
+willy_xpos	db 0
+willy_ypos	db 0
+
 ; I DON'T THINK I NEED THESE POINTERS TO THE LISTS... everything is done in just 1 function?
 erase16xNlistptr dw erase16xNlist
 erase8x16listptr dw erase8x16list
@@ -9568,10 +9594,12 @@ tune_offset		db 0
 tune_tick		db TUNETICKINITIAL
 tune_play		db 1
 
-	ALIGN 32
-willy_xpos	db 0
-willy_ypos	db 0
-willy_oldpos db 0, 0
+
+
+;	ALIGN 32
+;willy_xpos	db 0
+;willy_ypos	db 0
+;willy_oldpos db 0, 0
 
 
 	IF TUNE3LOOPSTHEN2
@@ -9593,6 +9621,108 @@ tune_data	db #80, #72, #66, #60, #56, #66, #56, #56, #51, #60, #51, #51, #56, #6
 			db #51, #51, #56, #66, #56, #56, #80, #72, #66, #60, #56, #66, #56, #40
 			db #56, #66, #80, #66, #56, #56, #56, #56
 	ENDIF
+
+; HL: tokenised string address
+; DE: buffer to expand into
+; at exit-
+; C: proportional string length
+expand_measurepr_tokenised_string:
+.prelude
+	ld c, 0
+.body
+	ld ix, ('A' - 'a')&255 ; IXL: Camel Case adjustment. IXH: 0 (to set not capitals, which happens most of the time)
+	ld a, (hl)
+	or a ; first token TOKEN_LEADINGTHE?
+	jr z, .leadingthe
+.loop
+	ld a, (hl)
+	inc hl
+	cp 31
+	jr nz, .not_eos
+	dec c ; no need for letter separator at EOS
+	xor a
+	ld (de), a
+	ret
+.not_eos
+	or a
+	jr nz, .notspace
+
+	ld a, ' '
+	call add_pr_letterwidth
+	jr .body
+
+.notspace
+	cp 27
+	jr nc, .isspecial
+	add 'a'-1
+	add ixl ; adjust for Camel Case if required
+	ld ixl, ixh ; set to lowercase again now
+.readytoput
+
+	call add_pr_letterwidth
+	jr .loop
+
+.leadingthe
+	inc hl
+	push hl
+	ld hl, strThe
+	jr .docompound
+.isspecial
+
+	sub TOKEN_QUESTIONMARK
+	ld b, '?'
+	jr z, .donedecode
+	dec a ; TOKEN_APOSTROPHE?
+	ld b, "'"
+	jr z, .donedecode
+
+	push hl
+	ld hl, strOfThe
+	dec a ; TOKEN_MEETSTHE?
+	jr z, .docompound
+	ld l, strMeetsThe&255 ; ok cos strMeetsThe is aligned to not cross a page
+.docompound
+	ld a, (hl)
+	and 127 ; mask out terminator bit
+
+	call add_pr_letterwidth
+	bit 7, (hl)
+	inc hl
+	jr z, .docompound
+
+	pop hl
+	jr .body
+
+.donedecode
+	ld a, b
+	jr .readytoput
+
+add_pr_letterwidth:
+	ld (de), a
+	inc de
+
+	; get width
+	exx
+	rlca ; char*2
+	ld bc, FONTBASE
+	ld h, c ; 0
+	ld l, a
+	add hl, hl ; char*4
+	add hl, hl ; char*8
+	add hl, bc
+	ld a, (hl)
+	and 15 ; remove flags
+	inc a ; account for letter spacing
+	exx
+
+	add c
+	ld c, a
+	ret
+
+	DISPLAY "expand_measurepr_tokenised_string size: ", /A, $-expand_measurepr_tokenised_string
+
+	DISPLAY "Gap before level_tiles: ", /A, level_tiles-$
+
 	ALIGN 256 ; align this for faster access
 level_tiles:
 	BLOCK 16*2
@@ -9649,7 +9779,9 @@ lvl_time	db 0, 0, 0, 0, 0, 0, 0, 0 ;"00000000"
 
 textoutaddr dw SCRBASE
 textxoffset	db 0
+lvl_next	dw 0
 
+	; this gap is packed with data now
 	DISPLAY "Gap before tile_attribs: ", /A, tile_attribs-$
 
 	ASSERT $-level_tiles <= 256, You'll have to move some data before tile_attribs, it needs to be 256 ahead of level_tiles
@@ -9696,14 +9828,12 @@ shift_tbl
 	db %0000'0011
 	db %0000'0001
 
-lvl_next	dw 0
-
 Game_Over:
 	db 0 ; last in list
 	db 0 ; num keys, bright<<7, paper<<4 for key
-
+	
 	IF !PACKED
-	db 15, 12 ; willy start pos/facing
+	XY 15, 12 ; willy start pos/facing
 	db 15, 14 ; exit position
 	IPB 7, 0, 1 ; exit colour
 	db 0 ; border colour
@@ -9735,7 +9865,7 @@ Central_Cavern:
 	db 5 ; num keys, bright<<7, paper<<4 for key
 
 	IF !PACKED
-	db 2, 13 ; willy start pos/facing
+	XY 2, 13 ; willy start pos/facing
 	db 29, 13 ; exit position
 	IPB 6, 1, 0 ; exit colour
 	db 2 ; border colour
@@ -9821,7 +9951,7 @@ The_Cold_Room:
 	db 5;|(1<<4)	; number of keys/paper colour
 
 	IF !PACKED
-	db 2, 13 ; willy start pos/facing
+	XY 2, 13 ; willy start pos/facing
 	db 29, 13 ; exit position
 	IPB 3, 1, 1 ; exit colour
 	db 2 ; border colour
@@ -9913,7 +10043,7 @@ The_Menagerie:
 	db 5 ; number of keys/paper colour
 
 	IF !PACKED
-	db 2, 13 ; willy start pos/facing
+	XY 2, 13 ; willy start pos/facing
 	db 29, 11 ; exit position
 	IPB 6, 1, 0 ; exit colour
 	db 2 ; border colour
@@ -10000,7 +10130,7 @@ Abandoned_Uranium_Workings:
 	db 5	; number of keys/paper colour
 
 	IF !PACKED
-	db 28, 13+16 ; willy start pos/facing
+	XY 28, 13+16 ; willy start pos/facing
 	db 29, 1 ; exit position
 	IPB 6, 1, 0 ; exit colour
 	db 2 ; border colour
@@ -10087,7 +10217,7 @@ Eugenes_Lair:
 	db 5|(2<<4)	; number of keys/paper colour
 
 	IF !PACKED
-	db 1, 3 ; willy start pos/facing
+	XY 1, 3 ; willy start pos/facing
 	db 15, 13 ; exit position
 	IPB 7, 2, 0 ; exit colour
 	db 1 ; border colour
@@ -10189,7 +10319,7 @@ Processing_Plant:
 	db 5 ; num keys, bright<<7, paper<<4 for key
 
 	IF !PACKED
-	db 15, 3+16 ; willy start pos/facing
+	XY 15, 3+16 ; willy start pos/facing
 	db 29, 0 ; exit position
 	IPB 6, 1, 0 ; exit colour
 	db 2 ; border colour
@@ -10281,7 +10411,7 @@ The_Vat:
 	db 5|(2<<4)	; number of keys/key paper ; change of key paper does not work!!!
 
 	IF !PACKED
-	db 2, 13 ; willy start pos/facing
+	XY 2, 13 ; willy start pos/facing
 	db 15, 13 ; exit position
 	IPB 3, 1, 0 ; exit colour
 	db 4 ; border colour
@@ -10373,7 +10503,7 @@ Miner_Willy_meets_the_Kong_Beast:
 	db 4 ; num keys, bright<<7, paper<<4 for key
 
 	IF !PACKED
-	db 2, 13 ; willy start pos/facing
+	XY 2, 13 ; willy start pos/facing
 	db 15, 13 ; exit position
 	IPB 6, 1, 0 ; exit colour
 	db 2 ; border colour
@@ -10479,7 +10609,7 @@ Wacky_Amoebatrons:
 	db 1 ; num keys, bright<<7, paper<<4 for key
 
 	IF !PACKED
-	db 1, 13 ; willy start pos/facing
+	XY 1, 13 ; willy start pos/facing
 	db 1, 0 ; exit position
 	IPB 6, 1, 0 ; exit colour
 	db 1 ; border colour
@@ -10575,7 +10705,7 @@ The_Endorian_Forest:
 	db 5 ; num keys, bright<<7, paper<<4 for key
 
 	IF !PACKED
-	db 1, 4 ; willy start pos/facing
+	XY 1, 4 ; willy start pos/facing
 	db 12, 13 ; exit position
 	IPB 6, 3, 0 ; exit colour
 	db 2 ; border colour
@@ -10691,7 +10821,7 @@ Attack_of_the_Mutant_Telephones:
 	db 5 ; num keys, bright<<7, paper<<4 for key
 
 	IF !PACKED
-	db 3, 1 ; willy start pos/facing
+	XY 3, 1 ; willy start pos/facing
 	db 1, 1 ; exit position
 	IPB 6, 2, 0 ; exit colour
 	db 2 ; border colour
@@ -10815,7 +10945,7 @@ Return_of_the_Alien_Kong_Beast:
 	db 5 ; num keys, bright<<7, paper<<4 for key
 
 	IF !PACKED
-	db 2, 13 ; willy start pos/facing
+	XY 2, 13 ; willy start pos/facing
 	db 15, 13 ; exit position
 	IPB 6, 3, 1 ; exit colour
 	db 2 ; border colour
@@ -10934,7 +11064,7 @@ Ore_Refinery:
 	db 5 ; num keys, bright<<7, paper<<4 for key
 
 	IF !PACKED
-	db 29, 13+16 ; willy start pos/facing
+	XY 29, 13+16 ; willy start pos/facing
 	db 1, 13 ; exit position
 	IPB 7, 1, 1 ; exit colour
 	db 1 ; border colour
@@ -11026,7 +11156,7 @@ Skylab_Landing_Bay:
 	db 4|(1<<4)	; number of keys/paper colour
 
 	IF !PACKED
-	db 29, 13 ; willy start pos/facing
+	XY 29, 13 ; willy start pos/facing
 	db 15, 0 ; exit position
 	IPB 6, 3, 0 ; exit colour
 	db 6 ; border colour
@@ -11124,7 +11254,7 @@ The_Bank:
 	db 3	; number of keys. This was wrong in 2010 version! Had an extra key
 
 	IF !PACKED
-	db 2, 13 ; willy start pos/facing
+	XY 2, 13 ; willy start pos/facing
 	db 1, 3 ; exit position
 	IPB 6, 2, 1 ; exit colour
 	db 2 ; border colour
@@ -11230,7 +11360,7 @@ The_Sixteenth_Cavern:
 	db 4	; number of keys
 
 	IF !PACKED
-	db 2, 13 ; willy start pos/facing
+	XY 2, 13 ; willy start pos/facing
 	db 12, 5 ; exit position
 	IPB 6, 3, 1 ; exit colour
 	db 2 ; border colour
@@ -11322,7 +11452,7 @@ The_Warehouse:
 	db 5|(4<<4)	; number of keys/key paper
 
 	IF !PACKED
-	db 2, 3+16 ; willy start pos/facing
+	XY 2, 3+16 ; willy start pos/facing
 	db 29, 1 ; exit position
 	IPB 4, 1, 1 ; exit colour
 	db 2 ; border colour
@@ -11436,7 +11566,7 @@ Amoebatrons_Revenge:
 	db 1	; number of keys
 
 	IF !PACKED
-	db 30, 13+16 ; willy start pos/facing
+	XY 30, 13+16 ; willy start pos/facing
 	db 29, 0 ; exit position
 	IPB 6, 1, 0 ; exit colour
 	db 1 ; border colour
@@ -11567,7 +11697,7 @@ Solar_Power_Generator:
 	db 3|(4<<4)	; number of keys/paper colour
 
 	IF !PACKED
-	db 14, 10 ; willy start pos/facing
+	XY 14, 10 ; willy start pos/facing
 	db 1, 1 ; exit position
 	IPB 6, 1, 1 ; exit colour
 	db 3 ; border colour
@@ -11673,7 +11803,7 @@ The_Final_Barrier:
 	db 5 ; num keys, bright<<7, paper<<4 for key
 
 	IF !PACKED
-	db 26, 13+16 ; willy start pos/facing
+	XY 26, 13+16 ; willy start pos/facing
 	db 19, 5 ; exit position
 	IPB 6, 3, 1 ; exit colour
 	db 2 ; border colour
