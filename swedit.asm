@@ -57,7 +57,7 @@ FALSE	EQU 0
 SILLYSPEED EQU FALSE;TRUE
 DBG_OCCUPIED EQU FALSE
 
-SPLASH	EQU FALSE;TRUE
+SPLASH	EQU TRUE
 
 ROLLINGDEMO	EQU  FALSE
 
@@ -81,7 +81,7 @@ GAMEOVERSTATE		EQU 1
 GAVEOVERINPROGRESS	EQU 2
 
 	IF	!FPS25
-TIMING		EQU TRUE
+TIMING		EQU FALSE;TRUE
 	ELSE
 TIMING		EQU FALSE
 	ENDIF
@@ -507,26 +507,6 @@ mainloop:
 	SETBORDER 1
 	ENDIF
 
-	IF 0
-
-	ld hl, willy_oldpos
-	ld a, (hl)
-	and ~7
-	rrca
-	rrca
-	rrca
-	ld c, a
-	inc l
-	ld a, (hl)
-	and ~7
-	rrca
-	rrca
-	rrca
-	ld b, a
-	call erase_willy
-
-	ENDIF
-
 	ld hl, tile_attribs
 	ld c, (hl) ; background colour
 
@@ -849,113 +829,6 @@ donedrawguardians:
 drawwilly:
 	jp draw_willy_2rows
 
-	IF 0
-
-	ld hl, willy_xpos
-	ld a, (hl)
-	ld d, a
-	and 7
-	rrca
-	rrca
-	rrca
-	ld e, a
-	ld a, d
-	and ~7
-	rrca
-	rrca
-	rrca
-	ld c, a
-	inc l
-	ld a, (hl)
-	and ~7
-	rrca
-	rrca
-	rrca
-	ld b, a
-	ld d, gfx_gnewwilly0/256
-	ld a, (willy_facing)
-	dec a
-	jr z, .dontadjustdbottomsprite
-	inc d
-.dontadjustdbottomsprite
-
-	ld a, b
-	add b ; A = B*2
-	ld h, tbl_rows/256 ; high byte of screen address lookup table. Aligned 256 so low byte will be just row*2
-	ld l, a ; index into table 
-	ld a, (hl) ; low byte of screen address
-	inc l ; point HL to high byte of screen address
-	ld h, (hl) ; read high byte of screen address
-	add c ; add on column to low byte of screen address
-	ld l, a ; and write it back. HL now holds correct screen address
-	; so we now know the address...
-; HL: screen address
-sprite16x16raKnowAddr:
-
-	ex de, hl							; 4T	
-	ld sp, hl							; 6T	10T
-	ex de, hl							; 4T	14T
-
-	REPT 4
-	pop de								; 10T	
-	ld a, (hl)							; 7T	17T
-	or e								; 4T	21T
-	ld (hl), a							; 7T	28T
-	inc l								; 4T	32T
-	ld a, (hl)							; 7T	39T
-	or d								; 4T	43T
-	ld (hl), a							; 7T	50T
-	inc h								; 4T	54T
-	pop de								; 10T	64T
-	ld a, (hl)							; 7T	71T
-	or d								; 4T	75T
-	ld (hl), a							; 7T	82T
-	dec l								; 4T	86T
-	ld a, (hl)							; 7T	93T
-	or e								; 4T	97T
-	ld (hl), a							; 7T	104T
-	inc h								; 4T	108T
-	ENDR								; 14T + 108T*4 = 446T
-
-	; we could split this into 2 routines depending on whether we straddle a screen third boundary or not
-	; which we could work out before calling
-	; then we could remove the jr c
-	ld a, #20							; 7T		453T
-	add l								; 4T		457T
-	ld l, a								; 4T		461T
-	jr c, .ok							; 12T/7T	468T/480T
-	ld a, h								; 4T		472T
-	sub #8								; 7T		479T
-	ld h, a								; 4T		483T
-.ok
-
-	; 483T if cross boundary, 480T otherwise
-
-	REPT 4, idx
-	pop de								; 10T
-	ld a, (hl)							; 7T
-	or e								; 4T
-	ld (hl), a							; 7T	
-	inc l								; 4T	
-	ld a, (hl)							; 7T
-	or d								; 4T
-	ld (hl), a							; 7T	
-	inc h								; 4T	
-	pop de								; 10T	
-	ld a, (hl)							; 7T
-	or d								; 4T
-	ld (hl), a							; 7T	
-	dec l								; 4T	
-	ld a, (hl)							; 7T
-	or e								; 4T
-	ld (hl), a							; 7T	
-	IF idx < 3
-	inc h								; 4T
-	ENDIF
-	ENDR								;
-
-	ENDIF
-	
 donedrawwilly:
 
 	IF TIMING
@@ -4073,7 +3946,6 @@ update_willy:
 	exx
 	ld (de), a
 
-update_willy_pos:
 	call read_keyboard
 	ld hl, willy_xpos
 	ld a, (hl)
@@ -4086,6 +3958,7 @@ update_willy_pos:
 	ld (hl), a
 .doneupatepos
 
+update_willy_pos:
 	ld d, gfx_gnewwilly0/256
 
 	ld a, (willy_facing)
@@ -4103,7 +3976,6 @@ update_willy_pos:
 
 	ld (draw_willy_2rows+1), de
 
-.brkhere
 	ld hl, (willy_colpos)
 	ld a, l
 	and ~31
@@ -4385,82 +4257,6 @@ clear_playarea:
 	ld bc, 4096-1
 	ldir
 	ret
-
-	IF 0
-	; B: row
-	; C: column
-erase_willy:
-	; I think there's a much faster way of doing this involving rrca
-	ld de, collision_map
-	ld l, b
-	ld h, e ; E = 0
-	REPT 5
-	add hl, hl ; *2, ... , *32
-	ENDR
-	add hl, de
-	ld a, l
-	or c ; add on column
-	ld l, a
-
-	; hl now has collision map address
-	push hl
-	ld a, (hl)
-	or a
-	jr nz, .tlnotblank
-	call erase8x8a
-	jp .topright
-.tlnotblank
-
-	COLLMAPTOTILE
-	call sprite8x8a
-
-.topright
-	pop hl
-	inc l ; look at top right cell
-	inc c ; which is one column over
-	push hl
-	ld a, (hl)
-	or a
-	jr nz, .trnotblank
-	call erase8x8a
-	jp .botright
-.trnotblank
-
-	COLLMAPTOTILE
-	call sprite8x8a
-
-.botright
-	pop hl
-	ld de, 32
-	add hl, de
-	inc b ; move 1 cell down
-	push hl
-	ld a, (hl)
-	or a
-	jr nz, .brnotblank
-	call erase8x8a
-	jp .botleft
-.brnotblank
-
-	COLLMAPTOTILE
-	call sprite8x8a
-
-.botleft
-	pop hl
-	dec l ; look at bottom left cell
-	dec c ; which is one column left
-	ld a, (hl)
-	or a
-	jr nz, .blnotblank
-	call erase8x8a
-	ret
-.blnotblank
-
-	COLLMAPTOTILE
-	call sprite8x8a
-
-	ret
-	ENDIF
 
 ; B: row (in character cells, so [0-23])
 ; C: column
