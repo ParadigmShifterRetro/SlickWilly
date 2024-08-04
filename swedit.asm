@@ -63,7 +63,7 @@ ROLLINGDEMO	EQU  FALSE
 
 DOUBLEUPTUNE	EQU FALSE ; TRUE sounds bad lol
 
-PLAYTUNE	EQU FALSE;TRUE
+PLAYTUNE	EQU FALSE;TRUE;
 	IF DOUBLEUPTUNE
 TUNETICKINITIAL	EQU 2;5
 	ELSE
@@ -145,6 +145,20 @@ EVENT_GAMEOVER	EQU #FC
 TALLCHARBUFF	EQU collision_map + 512 - 9 ; last 9 bytes of collision map used as tall character buffer
 
 PUTCHAR	EQU sputprcharlinear;put8x8prchar;put8x8char;
+
+	MACRO ADDTOERASECELLSLIST
+	push hl
+	ld bc, ATTRIBS-collision_map
+	add hl, bc
+	ATTRIBSTOSCR h
+	ex de, hl
+	ld (hl), a
+	inc l ; does not cross 256 byte boundary
+	ld (hl), e
+	inc l ; does not cross 256 byte boundary
+	ex de, hl
+	pop hl
+	ENDM
 
 	; B row
 	; C column. Both of those in attrib cells
@@ -483,19 +497,57 @@ mainloop:
 
 	ENDIF
 
+	ld hl, tile_attribs
+	ld c, (hl) ; background colour
+
+	ld hl, erasecellslist
+	ld b, 0
+.nextcellerase
+	ld a, (hl)
+	or a
+	jr z, .donecellerase
+	inc l
+	ld e, (hl)
+	ld d, a
+	inc l
+
+	ex de, hl
+
+	REPT 8, idx
+	ld (hl), b
+	IF idx < 7
+	inc h
+	ENDIF
+	ENDR
+
+	; attribs
+	SCRTOATTRIBS h
+	ld h, a ; HL should be attribs address now
+
+	ld (hl), c
+
+	ex de, hl
+
+	jr .nextcellerase
+
+
+.donecellerase
+
 .doneerasewilly
 
 	ld hl, tile_attribs
 	ld c, (hl) ; background colour
 
 	; erase
+	; ARE THESE THE WRONG ENDIANNESS OR NOT??
+	; They are supposed to be HIGH BYTE LOW BYTE so high byte is guaranteed to be non-zero?
+	; looks like they are other way around :(
 	ld hl, erase8x16list
 	ld b, 0
 .nexterase
 	ld a, (hl)
 	or a
 	jr z, .doneerase8x16
-.doerase
 	inc l
 	ld d, (hl)
 	ld e, a
@@ -522,26 +574,18 @@ mainloop:
 	ENDR
 	ld (hl), b
 
-	IF GUARDIANSERASEATTRIBS
-	; attribs
-	SCRTOATTRIBS h
-	ld h, a ; HL should be attribs address now 
-	ld (hl), c
-	ld a, -32
-	add l
-	ld l, a
-	jr c, .dontadjusth
-	dec h
-.dontadjusth
-	ld (hl), c
-	ENDIF
-
 	ex de, hl
 	inc l
 	jr .nexterase
 
 
 .doneerase8x16
+
+	IF GUARDIANSERASEATTRIBS
+	ld hl, tile_attribs
+	ld c, (hl) ; background colour
+	ENDIF
+
 	ld hl, erase16xNlist
 
 .nexterase16xN
@@ -1103,6 +1147,12 @@ mainlooprestoresp:
 	ld a, (has_solar)
 	or a
 	call nz, do_solar_down_left
+
+	IF TIMING
+	SETBORDER 3
+	ENDIF
+
+	call update_willy
 
 	ld hl, frame_counter
 	inc (hl)
@@ -2278,6 +2328,9 @@ parse_unpacked_level:
 	ld h, a
 	ld l, a
 	ld (gfx_copyevent), hl
+
+	ld hl, erasecellslist
+	ld (hl), a
 
 	ld hl, collision_map
 	ld de, collision_map+1
@@ -3891,6 +3944,53 @@ put_level_name_unpacked:
 
 	DISPLAY "put_level_name_unpacked size: ",/A, $-put_level_name_unpacked
 
+update_willy:
+	ld de, erasecellslist
+	ld hl, (willy_colpos)
+	ld bc, collision_map
+	add hl, bc
+
+	ld a, (hl)
+	or a
+	jr nz, .tlnotblank
+	
+	ADDTOERASECELLSLIST
+
+.tlnotblank
+	inc l
+
+	ld a, (hl)
+	or a
+	jr nz, .trnotblank
+	
+	ADDTOERASECELLSLIST
+
+	ld a, 31
+	add l
+	ld l, a
+	jr nc, .addrokmid
+	inc h
+.addrokmid
+.trnotblank
+
+	ld a, (hl)
+	or a
+	jr nz, .midlnotblank
+	
+	ADDTOERASECELLSLIST
+
+.midlnotblank
+	inc l
+
+	ld a, (hl)
+	or a
+	jr nz, .midrnotblank
+	
+	ADDTOERASECELLSLIST
+.midrnotblank
+	xor a
+	ld (de), a
+
 update_willy_pos:
 	ld d, gfx_gnewwilly0/256
 
@@ -4139,6 +4239,7 @@ clear_playarea:
 	ldir
 	ret
 
+	IF 0
 	; B: row
 	; C: column
 erase_willy:
@@ -4212,6 +4313,7 @@ erase_willy:
 	call sprite8x8a
 
 	ret
+	ENDIF
 
 ; B: row (in character cells, so [0-23])
 ; C: column
@@ -9720,6 +9822,9 @@ add_pr_letterwidth:
 	ret
 
 	DISPLAY "expand_measurepr_tokenised_string size: ", /A, $-expand_measurepr_tokenised_string
+
+erasecellslist:
+	BLOCK 6*2+1 ; max 6 tiles behind willy to be erased per frame
 
 	DISPLAY "Gap before level_tiles: ", /A, level_tiles-$
 
