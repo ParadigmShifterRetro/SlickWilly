@@ -1,4 +1,4 @@
-Slick Willy Rolling Demo code WIP
+Slick Willy Engine - code WIP
 
 For ZX Spectrum 48K
 
