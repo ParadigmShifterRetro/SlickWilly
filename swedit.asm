@@ -54,10 +54,12 @@ FONTBASE	EQU	proportional_font-256
 TRUE	EQU 1
 FALSE	EQU 0
 
+UPDOWNKEYS	EQU TRUE
+
 SILLYSPEED EQU FALSE;TRUE
 DBG_OCCUPIED EQU FALSE
 
-SPLASH	EQU TRUE
+SPLASH	EQU FALSE;TRUE;
 
 ROLLINGDEMO	EQU  FALSE
 
@@ -67,7 +69,7 @@ PLAYTUNE	EQU FALSE;TRUE;
 	IF DOUBLEUPTUNE
 TUNETICKINITIAL	EQU 2;5
 	ELSE
-TUNETICKINITIAL	EQU 4;5
+TUNETICKINITIAL	EQU 5
 	ENDIF
 TUNENUMLOOPS	EQU 3; 3 is standard, 2 sounds ok though?
 TUNE3LOOPSTHEN2	EQU 0;1
@@ -81,12 +83,12 @@ GAMEOVERSTATE		EQU 1
 GAVEOVERINPROGRESS	EQU 2
 
 	IF	!FPS25
-TIMING		EQU FALSE;TRUE
+TIMING		EQU TRUE;FALSE;
 	ELSE
 TIMING		EQU FALSE
 	ENDIF
 
-BEAMFLICKERTEST	EQU FALSE
+BEAMFLICKERTEST	EQU TRUE;FALSE
 
 AIRTICKS	EQU 16
 
@@ -2317,6 +2319,18 @@ parse_unpacked_level:
 	rlca ; multiply by 8 to get willy_xpos
 	ld (willy_xpos), a
 
+	ld de, (willy_colpos)
+	REPT 3
+	sla e
+	rl d
+	ENDR
+	ld a, d
+	and 15
+	rlca
+	rlca
+	rlca
+	ld (willy_ypos), a
+
 	ld a, c
 	ld (willy_facing), a
 
@@ -3940,6 +3954,43 @@ update_willy:
 	ADDTOREDRAWCELLSLIST
 
 .done2rows
+
+	ld a, (willy_ypos)
+	and 7
+	jr z, .doneeraselists
+
+	ld a, 31
+	add l
+	ld l, a
+	jr nc, .addrokbot
+	inc h
+.addrokbot
+
+	ld a, (hl)
+	or a
+	jr nz, .botlnotblank
+	
+	ADDTOERASECELLSLIST
+	jp .botright
+
+.botlnotblank
+	ADDTOREDRAWCELLSLIST
+
+.botright
+	inc l
+
+	ld a, (hl)
+	or a
+	jr nz, .botrnotblank
+	
+	ADDTOERASECELLSLIST
+	jp .doneeraselists
+
+.botrnotblank
+	ADDTOREDRAWCELLSLIST
+
+
+.doneeraselists
 	xor a
 	ld (de), a
 
@@ -3958,6 +4009,22 @@ update_willy:
 	ld (hl), a
 .doneupatepos
 
+	IF UPDOWNKEYS
+	ld hl, willy_ypos
+	ld a, (hl)
+	add b
+	cp -1
+	jr z, .doneupdateypos
+	cp 13*8+1
+	jr nc, .doneupdateypos
+
+	ld (hl), a
+.doneupdateypos
+	ENDIF
+
+	; since we only erase cells we left, if we entered a blank cell we need to set the attribs in that cell
+	; (just the attribs will do). Another list? It's at most 3 length (moved diagonally) if we check whether we already erased the cell...
+
 update_willy_pos:
 	ld d, gfx_gnewwilly0/256
 
@@ -3968,28 +4035,129 @@ update_willy_pos:
 
 .setanimframe
 	ld a, (willy_xpos)
+	ld b, a
 	and 7
 	rrca
 	rrca
 	rrca ; *32
 	ld e, a
 
-	ld (draw_willy_2rows+1), de
-
-	ld hl, (willy_colpos)
-	ld a, l
-	and ~31
+	ld a, b; (willy_xpos)
+	and ~7
 	ld l, a
 
-	ld a, (willy_xpos)
+	ld a, (willy_ypos)
+	ld c, a
 	and ~7
 	rrca
 	rrca
 	rrca
-	or l
-	ld l, a
+	
+	; now shift that into top bits of l
+	REPT 3
+	rrca
+	rr l
+	ENDR
+	and 3
+	ld h, a
 
 	ld (willy_colpos), hl
+
+	ld a, c
+	and 7
+	ld c, a
+	jp z, .draw2rows
+	
+	ld h, willy_draw_jrtargets/256
+	dec a
+	rlca
+	ld l, a
+	ld a, (hl)
+	inc l
+	ld h, (hl)
+	ld l, a
+
+	bit 0, c
+	jr z, .drawateveny
+
+	; odd y
+	ld (draw_willy_oddy+1), de
+	ld a, l
+	ld (willyoddyjumptargettoprows+1), a
+	ld a, h
+	ld (willyoddyjumptargetbotrows+1), a
+
+	ld hl, draw_willy_oddy
+	ld (drawwilly+1), hl
+
+	ld hl, (willy_colpos)
+	ld de, ATTRIBS
+	add hl, de
+	ATTRIBSTOSCR h
+	add c
+	ld h, a ; adjust start address for being at an odd row
+
+	ld (willyoddyrow0addr+1), hl
+
+	ld hl, (willy_colpos)
+	ld de, ATTRIBS+32
+	add hl, de
+	ATTRIBSTOSCR h
+	ld h, a
+
+	ld (willyoddyrow1addr+1), hl
+
+	ld hl, (willy_colpos)
+	ld de, ATTRIBS+64
+	add hl, de
+	ATTRIBSTOSCR h
+	ld h, a
+
+	ld (willyoddyrow2addr+1), hl
+
+	ret
+
+.drawateveny
+
+	; even y
+	ld (draw_willy_eveny+1), de
+	ld a, l
+	ld (willyevenyjumptargettoprows+1), a
+	ld a, h
+	ld (willyevenyjumptargetbotrows+1), a
+
+	ld hl, draw_willy_eveny
+	ld (drawwilly+1), hl
+
+	ld hl, (willy_colpos)
+	ld de, ATTRIBS
+	add hl, de
+	ATTRIBSTOSCR h
+	add c
+	ld h, a ; adjust start address for being at an odd row
+
+	ld (willyevenyrow0addr+1), hl
+
+	ld hl, (willy_colpos)
+	ld de, ATTRIBS+32
+	add hl, de
+	ATTRIBSTOSCR h
+	ld h, a
+
+	ld (willyevenyrow1addr+1), hl
+
+	ld hl, (willy_colpos)
+	ld de, ATTRIBS+64
+	add hl, de
+	ATTRIBSTOSCR h
+	ld h, a
+
+	ld (willyevenyrow2addr+1), hl
+
+	ret
+
+.draw2rows
+	ld (draw_willy_2rows+1), de
 
 	ld de, ATTRIBS
 	add hl, de
@@ -4005,6 +4173,10 @@ update_willy_pos:
 	ld h, a
 
 	ld (willyrow1addr+1), hl
+
+	; set the routine to use
+	ld hl, draw_willy_2rows
+	ld (drawwilly+1), hl
 
 	ret
 
@@ -4025,6 +4197,23 @@ read_keyboard:
 	; to do the read of the port
 
 	ld bc, 0
+
+	IF UPDOWNKEYS
+	; are we pressing P?
+	ld a, #DF
+	in a, (#FE)
+	bit 0, a
+	jr nz, .notpressingP
+	dec b
+.notpressingP
+	; are we pressing L?
+	ld a, #BF
+	in a, (#FE)
+	bit 1, a
+	jr nz, .notpressingL
+	inc b
+.notpressingL
+	ENDIF
 
 	; are we pressing W?
 	ld a, #FB
@@ -4337,6 +4526,382 @@ willyrow1addr:
 	inc h								; 4T	108T
 	ENDIF
 	ENDR								; 14T + 108T*4 = 446T
+
+	jp donedrawwilly
+
+; if Y coord mod 8 == 2:
+;	3 double rows at top, jump target = 0
+;	1 double row at bottom, jump target = #24
+
+; if Y coord mod 8 == 4:
+;	2 double rows at top, jump target = #12
+;	2 double rows at top, jump target = #12
+
+; if Y coord mod 8 == 6:
+;	1 double row at top, jump target = #24
+;	3 double rows at bottom, jump target = 0
+
+draw_willy_eveny:
+	ld sp, 0 ; SMC
+
+willyevenyrow0addr:
+	ld hl, 0 ; SMC
+
+willyevenyjumptargettoprows
+	jr willyevenyjumptargettoprows ; SMC. Default is to inifinite loop so if you forget to set it, debugger halts here
+
+willyevenydraw6rowstop ; jump target offset = #0
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+	inc h								; 4T	54T
+	pop de								; 10T	64T
+	ld a, (hl)							; 7T	71T
+	or d								; 4T	75T
+	ld (hl), a							; 7T	82T
+	dec l								; 4T	86T
+	ld a, (hl)							; 7T	93T
+	or e								; 4T	97T
+	ld (hl), a							; 7T	104T
+	inc h								; 4T	108T
+
+willyevenydraw4rowstop ; jump target offset = #12 (18 bytes)
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+	inc h								; 4T	54T
+	pop de								; 10T	64T
+	ld a, (hl)							; 7T	71T
+	or d								; 4T	75T
+	ld (hl), a							; 7T	82T
+	dec l								; 4T	86T
+	ld a, (hl)							; 7T	93T
+	or e								; 4T	97T
+	ld (hl), a							; 7T	104T
+	inc h								; 4T	108T
+
+willyevenydraw2rowstop ; jump target offset = #24 (36 bytes)
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+	inc h								; 4T	54T
+	pop de								; 10T	64T
+	ld a, (hl)							; 7T	71T
+	or d								; 4T	75T
+	ld (hl), a							; 7T	82T
+	dec l								; 4T	86T
+	ld a, (hl)							; 7T	93T
+	or e								; 4T	97T
+	ld (hl), a							; 7T	104T
+
+willyevenyrow1addr:
+	ld hl, 0 ; SMC
+
+	REPT 4, idx
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+	inc h								; 4T	54T
+	pop de								; 10T	64T
+	ld a, (hl)							; 7T	71T
+	or d								; 4T	75T
+	ld (hl), a							; 7T	82T
+	dec l								; 4T	86T
+	ld a, (hl)							; 7T	93T
+	or e								; 4T	97T
+	ld (hl), a							; 7T	104T
+	IF idx < 3
+	inc h								; 4T	108T
+	ENDIF
+	ENDR								; 14T + 108T*4 = 446T
+
+willyevenyrow2addr:
+	ld hl, 0 ; SMC
+
+willyevenyjumptargetbotrows
+	jr willyevenyjumptargetbotrows ; SMC. Default is to inifinite loop so if you forget to set it, debugger halts here
+
+willyevenydraw6rowsbot ; jump target offset = #0
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+	inc h								; 4T	54T
+	pop de								; 10T	64T
+	ld a, (hl)							; 7T	71T
+	or d								; 4T	75T
+	ld (hl), a							; 7T	82T
+	dec l								; 4T	86T
+	ld a, (hl)							; 7T	93T
+	or e								; 4T	97T
+	ld (hl), a							; 7T	104T
+	inc h								; 4T	108T
+
+willyevenydraw4rowsbot ; jump target offset = #12 (18 bytes)
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+	inc h								; 4T	54T
+	pop de								; 10T	64T
+	ld a, (hl)							; 7T	71T
+	or d								; 4T	75T
+	ld (hl), a							; 7T	82T
+	dec l								; 4T	86T
+	ld a, (hl)							; 7T	93T
+	or e								; 4T	97T
+	ld (hl), a							; 7T	104T
+	inc h								; 4T	108T
+
+willyevenydraw2rowsbot ; jump target offset = #24 (36 bytes)
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+	inc h								; 4T	54T
+	pop de								; 10T	64T
+	ld a, (hl)							; 7T	71T
+	or d								; 4T	75T
+	ld (hl), a							; 7T	82T
+	dec l								; 4T	86T
+	ld a, (hl)							; 7T	93T
+	or e								; 4T	97T
+	ld (hl), a							; 7T	104T
+
+	jp donedrawwilly
+
+; if Y coord mod 8 == 1:
+;	draw 3 double rows top, jump target = 0
+;	draw 0 double rows bottom, jump target = #36
+
+; if Y coord mod 8 == 3:
+;	draw 2 double rows top, jump target = #12
+;	draw 1 double row top, jump target = #24
+
+; if Y coord mod 8 == 5:
+;	draw 1 double row top, jump target = #24
+;	draw 2 double rows bottom, jump target = #12
+
+; if Y coord mod 8 == 7:
+;	draw 0 double rows top, jump target = #36
+;	draw 3 double rows top, jump target = 0
+
+draw_willy_oddy:
+	ld sp, 0 ; SMC
+
+willyoddyrow0addr:
+	ld hl, 0 ; SMC
+
+willyoddyjumptargettoprows
+	jr willyoddyjumptargettoprows ; SMC. Default is to inifinite loop so if you forget to set it, debugger halts here
+
+willyoddydraw7rowstop ; jump target offset = #0
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+	inc h								; 4T	54T
+	pop de								; 10T	64T
+	ld a, (hl)							; 7T	71T
+	or d								; 4T	75T
+	ld (hl), a							; 7T	82T
+	dec l								; 4T	86T
+	ld a, (hl)							; 7T	93T
+	or e								; 4T	97T
+	ld (hl), a							; 7T	104T
+	inc h								; 4T	108T
+
+willyoddydraw5rowstop ; jump target offset = #12 (18 bytes)
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+	inc h								; 4T	54T
+	pop de								; 10T	64T
+	ld a, (hl)							; 7T	71T
+	or d								; 4T	75T
+	ld (hl), a							; 7T	82T
+	dec l								; 4T	86T
+	ld a, (hl)							; 7T	93T
+	or e								; 4T	97T
+	ld (hl), a							; 7T	104T
+	inc h								; 4T	108T
+
+willyoddydraw3rowstop ; jump target offset = #24 (36 bytes)
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+	inc h								; 4T	54T
+	pop de								; 10T	64T
+	ld a, (hl)							; 7T	71T
+	or d								; 4T	75T
+	ld (hl), a							; 7T	82T
+	dec l								; 4T	86T
+	ld a, (hl)							; 7T	93T
+	or e								; 4T	97T
+	ld (hl), a							; 7T	104T
+	inc h								; 4T	108T
+
+willyoddydraw1rowtop ; jump target offset = #36 (54 bytes)
+
+	; draw the remaining row
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+
+willyoddyrow1addr:
+	ld hl, 0 ; SMC
+
+	REPT 4, idx
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+	inc h								; 4T	54T
+	pop de								; 10T	64T
+	ld a, (hl)							; 7T	71T
+	or d								; 4T	75T
+	ld (hl), a							; 7T	82T
+	dec l								; 4T	86T
+	ld a, (hl)							; 7T	93T
+	or e								; 4T	97T
+	ld (hl), a							; 7T	104T
+	IF idx < 3
+	inc h								; 4T	108T
+	ENDIF
+	ENDR								; 14T + 108T*4 = 446T
+
+willyoddyrow2addr:
+	ld hl, 0 ; SMC
+
+willyoddyjumptargetbotrows
+	jr willyoddyjumptargetbotrows ; SMC. Default is to inifinite loop so if you forget to set it, debugger halts here
+
+willyoddydraw7rowsbot ; jump target offset = #0
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+	inc h								; 4T	54T
+	pop de								; 10T	64T
+	ld a, (hl)							; 7T	71T
+	or d								; 4T	75T
+	ld (hl), a							; 7T	82T
+	dec l								; 4T	86T
+	ld a, (hl)							; 7T	93T
+	or e								; 4T	97T
+	ld (hl), a							; 7T	104T
+	inc h								; 4T	108T
+
+willyoddydraw5rowsbot ; jump target offset = #12 (18 bytes)
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+	inc h								; 4T	54T
+	pop de								; 10T	64T
+	ld a, (hl)							; 7T	71T
+	or d								; 4T	75T
+	ld (hl), a							; 7T	82T
+	dec l								; 4T	86T
+	ld a, (hl)							; 7T	93T
+	or e								; 4T	97T
+	ld (hl), a							; 7T	104T
+	inc h								; 4T	108T
+
+willyoddydraw3rowsbot ; jump target offset = #24 (36 bytes)
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+	inc h								; 4T	54T
+	pop de								; 10T	64T
+	ld a, (hl)							; 7T	71T
+	or d								; 4T	75T
+	ld (hl), a							; 7T	82T
+	dec l								; 4T	86T
+	ld a, (hl)							; 7T	93T
+	or e								; 4T	97T
+	ld (hl), a							; 7T	104T
+	inc h								; 4T	108T
+
+willyoddydraw1rowbot ; jump target offset = #36 (54 bytes)
+
+	; draw the remaining row
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
 
 	jp donedrawwilly
 
@@ -5846,6 +6411,8 @@ Final_Barrier_ImageData:
 	DISPLAY	"Final Barrier Image length: ", /A, $-Final_Barrier_ImageData
 
 	ALIGN 256
+
+	IF 1;0
 gfx_gnewwilly0
 			dg	.....##......... ;0
 			dg	..##.##......... ;1
@@ -6133,6 +6700,295 @@ gfx_gnewwilly15
 			dg	.........##.##.. ;13
 			dg	................ ;14
 			dg	........##.###.. ;15
+	ELSE
+gfx_gnewwilly0
+			dg	########........ ;0
+			dg	#......#........ ;1
+			dg	#......#........ ;2
+			dg	#......#........ ;3
+			dg	#......#........ ;4
+			dg	#..#...#........ ;5
+			dg	#...#..#........ ;6
+			dg	#.####.#........ ;7
+			dg	#...#..#........ ;8
+			dg	#..#...#........ ;9
+			dg	#......#........ ;10
+			dg	#......#........ ;11
+			dg	#......#........ ;12
+			dg	#......#........ ;13
+			dg	#......#........ ;14
+			dg	########........ ;15
+
+gfx_gnewwilly1
+			dg	.#########...... ;0
+			dg	.#.......#...... ;1
+			dg	.#.......#...... ;2
+			dg	.#.......#...... ;3
+			dg	.#.......#...... ;4
+			dg	.#...#...#...... ;5
+			dg	.#....#..#...... ;6
+			dg	.#..####.#...... ;7
+			dg	.#....#..#...... ;8
+			dg	.#...#...#...... ;9
+			dg	.#.......#...... ;10
+			dg	.#.......#...... ;11
+			dg	.#.......#...... ;12
+			dg	.#.......#...... ;13
+			dg	.#.......#...... ;14
+			dg	.#########...... ;15
+
+gfx_gnewwilly2
+			dg	..#########..... ;0
+			dg	..#.......#..... ;1
+			dg	..#.......#..... ;2
+			dg	..#.......#..... ;3
+			dg	..#.......#..... ;4
+			dg	..#...#...#..... ;5
+			dg	..#....#..#..... ;6
+			dg	..#..####.#..... ;7
+			dg	..#....#..#..... ;8
+			dg	..#...#...#..... ;9
+			dg	..#.......#..... ;10
+			dg	..#.......#..... ;11
+			dg	..#.......#..... ;12
+			dg	..#.......#..... ;13
+			dg	..#.......#..... ;14
+			dg	..#########..... ;15
+
+gfx_gnewwilly3
+			dg	...#########.... ;0
+			dg	...#.......#.... ;1
+			dg	...#.......#.... ;2
+			dg	...#.......#.... ;3
+			dg	...#.......#.... ;4
+			dg	...#...#...#.... ;5
+			dg	...#....#..#.... ;6
+			dg	...#..####.#.... ;7
+			dg	...#....#..#.... ;8
+			dg	...#...#...#.... ;9
+			dg	...#.......#.... ;10
+			dg	...#.......#.... ;11
+			dg	...#.......#.... ;12
+			dg	...#.......#.... ;13
+			dg	...#.......#.... ;14
+			dg	...#########.... ;15
+
+gfx_gnewwilly4
+			dg	....#########... ;0
+			dg	....#.......#... ;1
+			dg	....#.......#... ;2
+			dg	....#.......#... ;3
+			dg	....#.......#... ;4
+			dg	....#...#...#... ;5
+			dg	....#....#..#... ;6
+			dg	....#..####.#... ;7
+			dg	....#....#..#... ;8
+			dg	....#...#...#... ;9
+			dg	....#.......#... ;10
+			dg	....#.......#... ;11
+			dg	....#.......#... ;12
+			dg	....#.......#... ;13
+			dg	....#.......#... ;14
+			dg	....#########... ;15
+
+gfx_gnewwilly5
+			dg	.....#########.. ;0
+			dg	.....#.......#.. ;1
+			dg	.....#.......#.. ;2
+			dg	.....#.......#.. ;3
+			dg	.....#.......#.. ;4
+			dg	.....#...#...#.. ;5
+			dg	.....#....#..#.. ;6
+			dg	.....#..####.#.. ;7
+			dg	.....#....#..#.. ;8
+			dg	.....#...#...#.. ;9
+			dg	.....#.......#.. ;10
+			dg	.....#.......#.. ;11
+			dg	.....#.......#.. ;12
+			dg	.....#.......#.. ;13
+			dg	.....#.......#.. ;14
+			dg	.....#########.. ;15
+
+gfx_gnewwilly6
+			dg	......#########. ;0
+			dg	......#.......#. ;1
+			dg	......#.......#. ;2
+			dg	......#.......#. ;3
+			dg	......#.......#. ;4
+			dg	......#...#...#. ;5
+			dg	......#....#..#. ;6
+			dg	......#..####.#. ;7
+			dg	......#....#..#. ;8
+			dg	......#...#...#. ;9
+			dg	......#.......#. ;10
+			dg	......#.......#. ;11
+			dg	......#.......#. ;12
+			dg	......#.......#. ;13
+			dg	......#.......#. ;14
+			dg	......#########. ;15
+
+gfx_gnewwilly7
+			dg	.......######### ;0
+			dg	.......#.......# ;1
+			dg	.......#.......# ;2
+			dg	.......#.......# ;3
+			dg	.......#.......# ;4
+			dg	.......#...#...# ;5
+			dg	.......#....#..# ;6
+			dg	.......#..####.# ;7
+			dg	.......#....#..# ;8
+			dg	.......#...#...# ;9
+			dg	.......#.......# ;10
+			dg	.......#.......# ;11
+			dg	.......#.......# ;12
+			dg	.......#.......# ;13
+			dg	.......#.......# ;14
+			dg	.......######### ;15
+
+gfx_gnewwilly8
+			dg	#########....... ;0
+			dg	#.......#....... ;1
+			dg	#.......#....... ;2
+			dg	#.......#....... ;3
+			dg	#.......#....... ;4
+			dg	#....#..#....... ;5
+			dg	#...#...#....... ;6
+			dg	#..####.#....... ;7
+			dg	#...#...#....... ;8
+			dg	#....#..#....... ;9
+			dg	#.......#....... ;10
+			dg	#.......#....... ;11
+			dg	#.......#....... ;12
+			dg	#.......#....... ;13
+			dg	#.......#....... ;14
+			dg	#########....... ;15
+
+gfx_gnewwilly9
+			dg	.#########...... ;0
+			dg	.#.......#...... ;1
+			dg	.#.......#...... ;2
+			dg	.#.......#...... ;3
+			dg	.#.......#...... ;4
+			dg	.#....#..#...... ;5
+			dg	.#...#...#...... ;6
+			dg	.#..####.#...... ;7
+			dg	.#...#...#...... ;8
+			dg	.#....#..#...... ;9
+			dg	.#.......#...... ;10
+			dg	.#.......#...... ;11
+			dg	.#.......#...... ;12
+			dg	.#.......#...... ;13
+			dg	.#.......#...... ;14
+			dg	.#########...... ;15
+
+gfx_gnewwilly10
+			dg	..#########..... ;0
+			dg	..#.......#..... ;1
+			dg	..#.......#..... ;2
+			dg	..#.......#..... ;3
+			dg	..#.......#..... ;4
+			dg	..#....#..#..... ;5
+			dg	..#...#...#..... ;6
+			dg	..#..####.#..... ;7
+			dg	..#...#...#..... ;8
+			dg	..#....#..#..... ;9
+			dg	..#.......#..... ;10
+			dg	..#.......#..... ;11
+			dg	..#.......#..... ;12
+			dg	..#.......#..... ;13
+			dg	..#.......#..... ;14
+			dg	..#########..... ;15
+
+gfx_gnewwilly11
+			dg	...#########.... ;0
+			dg	...#.......#.... ;1
+			dg	...#.......#.... ;2
+			dg	...#.......#.... ;3
+			dg	...#.......#.... ;4
+			dg	...#....#..#.... ;5
+			dg	...#...#...#.... ;6
+			dg	...#..####.#.... ;7
+			dg	...#...#...#.... ;8
+			dg	...#....#..#.... ;9
+			dg	...#.......#.... ;10
+			dg	...#.......#.... ;11
+			dg	...#.......#.... ;12
+			dg	...#.......#.... ;13
+			dg	...#.......#.... ;14
+			dg	...#########.... ;15
+
+gfx_gnewwilly12
+			dg	....#########... ;0
+			dg	....#.......#... ;1
+			dg	....#.......#... ;2
+			dg	....#.......#... ;3
+			dg	....#.......#... ;4
+			dg	....#....#..#... ;5
+			dg	....#...#...#... ;6
+			dg	....#..####.#... ;7
+			dg	....#...#...#... ;8
+			dg	....#....#..#... ;9
+			dg	....#.......#... ;10
+			dg	....#.......#... ;11
+			dg	....#.......#... ;12
+			dg	....#.......#... ;13
+			dg	....#.......#... ;14
+			dg	....#########... ;15
+
+gfx_gnewwilly13
+			dg	.....#########.. ;0
+			dg	.....#.......#.. ;1
+			dg	.....#.......#.. ;2
+			dg	.....#.......#.. ;3
+			dg	.....#.......#.. ;4
+			dg	.....#....#..#.. ;5
+			dg	.....#...#...#.. ;6
+			dg	.....#..####.#.. ;7
+			dg	.....#...#...#.. ;8
+			dg	.....#....#..#.. ;9
+			dg	.....#.......#.. ;10
+			dg	.....#.......#.. ;11
+			dg	.....#.......#.. ;12
+			dg	.....#.......#.. ;13
+			dg	.....#.......#.. ;14
+			dg	.....#########.. ;15
+
+gfx_gnewwilly14
+			dg	......#########. ;0
+			dg	......#.......#. ;1
+			dg	......#.......#. ;2
+			dg	......#.......#. ;3
+			dg	......#.......#. ;4
+			dg	......#....#..#. ;5
+			dg	......#...#...#. ;6
+			dg	......#..####.#. ;7
+			dg	......#...#...#. ;8
+			dg	......#....#..#. ;9
+			dg	......#.......#. ;10
+			dg	......#.......#. ;11
+			dg	......#.......#. ;12
+			dg	......#.......#. ;13
+			dg	......#.......#. ;14
+			dg	......#########. ;15
+
+gfx_gnewwilly15
+			dg	........######## ;0
+			dg	........#......# ;1
+			dg	........#......# ;2
+			dg	........#......# ;3
+			dg	........#......# ;4
+			dg	........#...#..# ;5
+			dg	........#..#...# ;6
+			dg	........#.####.# ;7
+			dg	........#..#...# ;8
+			dg	........#...#..# ;9
+			dg	........#......# ;10
+			dg	........#......# ;11
+			dg	........#......# ;12
+			dg	........#......# ;13
+			dg	........#......# ;14
+			dg	........######## ;15
+	ENDIF
 
 horizontal_guardians_page:
 gfx_robot0	
@@ -9838,6 +10694,16 @@ lvl_next	dw 0
 tile_attribs:
 	BLOCK 16 ; can either use tile_attribs[0] as background colour or key paper colour. Not decided yet. tile_attribs[1:15] is the tile attribs anyway
 
+	ALIGN 256
+willy_draw_jrtargets:
+	db	0, #36		; Y-offset = 1
+	db	0, #24		; Y-offset = 2
+	db	#12, #24	; Y-offset = 3
+	db	#12, #12	; Y-offset = 4
+	db	#24, #12	; Y-offset = 5
+	db	#24, 0		; Y-offset = 6
+	db	#36, 0		; Y-offset = 7
+
 current_level:
 	;dw Game_Over
 	dw Central_Cavern
@@ -11636,7 +12502,11 @@ Amoebatrons_Revenge:
 
 	IPB					5, 0, 0
 	VGUARDIAN 20, 8, 2
+	IF BEAMFLICKERTEST
+	db 4, 104
+	ELSE
 	db 5, 104
+	ENDIF
 	VGUARDIANVELFLAGS 4, 0 ; speed and flags
 
 	IF 0
