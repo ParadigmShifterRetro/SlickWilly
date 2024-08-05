@@ -4702,208 +4702,7 @@ willyevenydraw2rowsbot ; jump target offset = #24 (36 bytes)
 
 	jp donedrawwilly
 
-; if Y coord mod 8 == 1:
-;	draw 3 double rows top, jump target = 0
-;	draw 0 double rows bottom, jump target = #36
-
-; if Y coord mod 8 == 3:
-;	draw 2 double rows top, jump target = #12
-;	draw 1 double row top, jump target = #24
-
-; if Y coord mod 8 == 5:
-;	draw 1 double row top, jump target = #24
-;	draw 2 double rows bottom, jump target = #12
-
-; if Y coord mod 8 == 7:
-;	draw 0 double rows top, jump target = #36
-;	draw 3 double rows top, jump target = 0
-
-draw_willy_oddy:
-	ld sp, 0 ; SMC
-
-willyoddyrow0addr:
-	ld hl, 0 ; SMC
-
-willyoddyjumptargettoprows
-	jr willyoddyjumptargettoprows ; SMC. Default is to inifinite loop so if you forget to set it, debugger halts here
-
-willyoddydraw7rowstop ; jump target offset = #0
-	pop de								; 10T	
-	ld a, (hl)							; 7T	17T
-	or e								; 4T	21T
-	ld (hl), a							; 7T	28T
-	inc l								; 4T	32T
-	ld a, (hl)							; 7T	39T
-	or d								; 4T	43T
-	ld (hl), a							; 7T	50T
-	inc h								; 4T	54T
-	pop de								; 10T	64T
-	ld a, (hl)							; 7T	71T
-	or d								; 4T	75T
-	ld (hl), a							; 7T	82T
-	dec l								; 4T	86T
-	ld a, (hl)							; 7T	93T
-	or e								; 4T	97T
-	ld (hl), a							; 7T	104T
-	inc h								; 4T	108T
-
-willyoddydraw5rowstop ; jump target offset = #12 (18 bytes)
-	pop de								; 10T	
-	ld a, (hl)							; 7T	17T
-	or e								; 4T	21T
-	ld (hl), a							; 7T	28T
-	inc l								; 4T	32T
-	ld a, (hl)							; 7T	39T
-	or d								; 4T	43T
-	ld (hl), a							; 7T	50T
-	inc h								; 4T	54T
-	pop de								; 10T	64T
-	ld a, (hl)							; 7T	71T
-	or d								; 4T	75T
-	ld (hl), a							; 7T	82T
-	dec l								; 4T	86T
-	ld a, (hl)							; 7T	93T
-	or e								; 4T	97T
-	ld (hl), a							; 7T	104T
-	inc h								; 4T	108T
-
-willyoddydraw3rowstop ; jump target offset = #24 (36 bytes)
-	pop de								; 10T	
-	ld a, (hl)							; 7T	17T
-	or e								; 4T	21T
-	ld (hl), a							; 7T	28T
-	inc l								; 4T	32T
-	ld a, (hl)							; 7T	39T
-	or d								; 4T	43T
-	ld (hl), a							; 7T	50T
-	inc h								; 4T	54T
-	pop de								; 10T	64T
-	ld a, (hl)							; 7T	71T
-	or d								; 4T	75T
-	ld (hl), a							; 7T	82T
-	dec l								; 4T	86T
-	ld a, (hl)							; 7T	93T
-	or e								; 4T	97T
-	ld (hl), a							; 7T	104T
-	inc h								; 4T	108T
-
-willyoddydraw1rowtop ; jump target offset = #36 (54 bytes)
-
-	; draw the remaining row
-	pop de								; 10T	
-	ld a, (hl)							; 7T	17T
-	or e								; 4T	21T
-	ld (hl), a							; 7T	28T
-	inc l								; 4T	32T
-	ld a, (hl)							; 7T	39T
-	or d								; 4T	43T
-	ld (hl), a							; 7T	50T
-
-willyoddyrow1addr:
-	ld hl, 0 ; SMC
-
-	REPT 4, idx
-	pop de								; 10T	
-	ld a, (hl)							; 7T	17T
-	or e								; 4T	21T
-	ld (hl), a							; 7T	28T
-	inc l								; 4T	32T
-	ld a, (hl)							; 7T	39T
-	or d								; 4T	43T
-	ld (hl), a							; 7T	50T
-	inc h								; 4T	54T
-	pop de								; 10T	64T
-	ld a, (hl)							; 7T	71T
-	or d								; 4T	75T
-	ld (hl), a							; 7T	82T
-	dec l								; 4T	86T
-	ld a, (hl)							; 7T	93T
-	or e								; 4T	97T
-	ld (hl), a							; 7T	104T
-	IF idx < 3
-	inc h								; 4T	108T
-	ENDIF
-	ENDR								; 14T + 108T*4 = 446T
-
-willyoddyrow2addr:
-	ld hl, 0 ; SMC
-
-willyoddyjumptargetbotrows
-	jr willyoddyjumptargetbotrows ; SMC. Default is to inifinite loop so if you forget to set it, debugger halts here
-
-willyoddydraw7rowsbot ; jump target offset = #0
-	pop de								; 10T	
-	ld a, (hl)							; 7T	17T
-	or e								; 4T	21T
-	ld (hl), a							; 7T	28T
-	inc l								; 4T	32T
-	ld a, (hl)							; 7T	39T
-	or d								; 4T	43T
-	ld (hl), a							; 7T	50T
-	inc h								; 4T	54T
-	pop de								; 10T	64T
-	ld a, (hl)							; 7T	71T
-	or d								; 4T	75T
-	ld (hl), a							; 7T	82T
-	dec l								; 4T	86T
-	ld a, (hl)							; 7T	93T
-	or e								; 4T	97T
-	ld (hl), a							; 7T	104T
-	inc h								; 4T	108T
-
-willyoddydraw5rowsbot ; jump target offset = #12 (18 bytes)
-	pop de								; 10T	
-	ld a, (hl)							; 7T	17T
-	or e								; 4T	21T
-	ld (hl), a							; 7T	28T
-	inc l								; 4T	32T
-	ld a, (hl)							; 7T	39T
-	or d								; 4T	43T
-	ld (hl), a							; 7T	50T
-	inc h								; 4T	54T
-	pop de								; 10T	64T
-	ld a, (hl)							; 7T	71T
-	or d								; 4T	75T
-	ld (hl), a							; 7T	82T
-	dec l								; 4T	86T
-	ld a, (hl)							; 7T	93T
-	or e								; 4T	97T
-	ld (hl), a							; 7T	104T
-	inc h								; 4T	108T
-
-willyoddydraw3rowsbot ; jump target offset = #24 (36 bytes)
-	pop de								; 10T	
-	ld a, (hl)							; 7T	17T
-	or e								; 4T	21T
-	ld (hl), a							; 7T	28T
-	inc l								; 4T	32T
-	ld a, (hl)							; 7T	39T
-	or d								; 4T	43T
-	ld (hl), a							; 7T	50T
-	inc h								; 4T	54T
-	pop de								; 10T	64T
-	ld a, (hl)							; 7T	71T
-	or d								; 4T	75T
-	ld (hl), a							; 7T	82T
-	dec l								; 4T	86T
-	ld a, (hl)							; 7T	93T
-	or e								; 4T	97T
-	ld (hl), a							; 7T	104T
-	inc h								; 4T	108T
-
-willyoddydraw1rowbot ; jump target offset = #36 (54 bytes)
-
-	; draw the remaining row
-	pop de								; 10T	
-	ld a, (hl)							; 7T	17T
-	or e								; 4T	21T
-	ld (hl), a							; 7T	28T
-	inc l								; 4T	32T
-	ld a, (hl)							; 7T	39T
-	or d								; 4T	43T
-	ld (hl), a							; 7T	50T
-
-	jp donedrawwilly
+	DISPLAY "draw_willy_eveny size: ", /A, $-draw_willy_eveny
 
 draw_horz_guardian:
 
@@ -10693,6 +10492,213 @@ lvl_next	dw 0
 ; tile attribs
 tile_attribs:
 	BLOCK 16 ; can either use tile_attribs[0] as background colour or key paper colour. Not decided yet. tile_attribs[1:15] is the tile attribs anyway
+
+; if Y coord mod 8 == 1:
+;	draw 3 double rows top, jump target = 0
+;	draw 0 double rows bottom, jump target = #36
+
+; if Y coord mod 8 == 3:
+;	draw 2 double rows top, jump target = #12
+;	draw 1 double row top, jump target = #24
+
+; if Y coord mod 8 == 5:
+;	draw 1 double row top, jump target = #24
+;	draw 2 double rows bottom, jump target = #12
+
+; if Y coord mod 8 == 7:
+;	draw 0 double rows top, jump target = #36
+;	draw 3 double rows top, jump target = 0
+
+draw_willy_oddy:
+	ld sp, 0 ; SMC
+
+willyoddyrow0addr:
+	ld hl, 0 ; SMC
+
+willyoddyjumptargettoprows
+	jr willyoddyjumptargettoprows ; SMC. Default is to inifinite loop so if you forget to set it, debugger halts here
+
+willyoddydraw7rowstop ; jump target offset = #0
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+	inc h								; 4T	54T
+	pop de								; 10T	64T
+	ld a, (hl)							; 7T	71T
+	or d								; 4T	75T
+	ld (hl), a							; 7T	82T
+	dec l								; 4T	86T
+	ld a, (hl)							; 7T	93T
+	or e								; 4T	97T
+	ld (hl), a							; 7T	104T
+	inc h								; 4T	108T
+
+willyoddydraw5rowstop ; jump target offset = #12 (18 bytes)
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+	inc h								; 4T	54T
+	pop de								; 10T	64T
+	ld a, (hl)							; 7T	71T
+	or d								; 4T	75T
+	ld (hl), a							; 7T	82T
+	dec l								; 4T	86T
+	ld a, (hl)							; 7T	93T
+	or e								; 4T	97T
+	ld (hl), a							; 7T	104T
+	inc h								; 4T	108T
+
+willyoddydraw3rowstop ; jump target offset = #24 (36 bytes)
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+	inc h								; 4T	54T
+	pop de								; 10T	64T
+	ld a, (hl)							; 7T	71T
+	or d								; 4T	75T
+	ld (hl), a							; 7T	82T
+	dec l								; 4T	86T
+	ld a, (hl)							; 7T	93T
+	or e								; 4T	97T
+	ld (hl), a							; 7T	104T
+	inc h								; 4T	108T
+
+willyoddydraw1rowtop ; jump target offset = #36 (54 bytes)
+
+	; draw the remaining row
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+
+willyoddyrow1addr:
+	ld hl, 0 ; SMC
+
+	REPT 4, idx
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+	inc h								; 4T	54T
+	pop de								; 10T	64T
+	ld a, (hl)							; 7T	71T
+	or d								; 4T	75T
+	ld (hl), a							; 7T	82T
+	dec l								; 4T	86T
+	ld a, (hl)							; 7T	93T
+	or e								; 4T	97T
+	ld (hl), a							; 7T	104T
+	IF idx < 3
+	inc h								; 4T	108T
+	ENDIF
+	ENDR								; 14T + 108T*4 = 446T
+
+willyoddyrow2addr:
+	ld hl, 0 ; SMC
+
+willyoddyjumptargetbotrows
+	jr willyoddyjumptargetbotrows ; SMC. Default is to inifinite loop so if you forget to set it, debugger halts here
+
+willyoddydraw7rowsbot ; jump target offset = #0
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+	inc h								; 4T	54T
+	pop de								; 10T	64T
+	ld a, (hl)							; 7T	71T
+	or d								; 4T	75T
+	ld (hl), a							; 7T	82T
+	dec l								; 4T	86T
+	ld a, (hl)							; 7T	93T
+	or e								; 4T	97T
+	ld (hl), a							; 7T	104T
+	inc h								; 4T	108T
+
+willyoddydraw5rowsbot ; jump target offset = #12 (18 bytes)
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+	inc h								; 4T	54T
+	pop de								; 10T	64T
+	ld a, (hl)							; 7T	71T
+	or d								; 4T	75T
+	ld (hl), a							; 7T	82T
+	dec l								; 4T	86T
+	ld a, (hl)							; 7T	93T
+	or e								; 4T	97T
+	ld (hl), a							; 7T	104T
+	inc h								; 4T	108T
+
+willyoddydraw3rowsbot ; jump target offset = #24 (36 bytes)
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+	inc h								; 4T	54T
+	pop de								; 10T	64T
+	ld a, (hl)							; 7T	71T
+	or d								; 4T	75T
+	ld (hl), a							; 7T	82T
+	dec l								; 4T	86T
+	ld a, (hl)							; 7T	93T
+	or e								; 4T	97T
+	ld (hl), a							; 7T	104T
+	inc h								; 4T	108T
+
+willyoddydraw1rowbot ; jump target offset = #36 (54 bytes)
+
+	; draw the remaining row
+	pop de								; 10T	
+	ld a, (hl)							; 7T	17T
+	or e								; 4T	21T
+	ld (hl), a							; 7T	28T
+	inc l								; 4T	32T
+	ld a, (hl)							; 7T	39T
+	or d								; 4T	43T
+	ld (hl), a							; 7T	50T
+
+	jp donedrawwilly
+
+	DISPLAY "draw_willy_oddy size: ", /A, $-draw_willy_oddy
+
+	DISPLAY "Gap before willy_draw_jrtargets: ", /A, willy_draw_jrtargets-$
 
 	ALIGN 256
 willy_draw_jrtargets:
