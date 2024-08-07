@@ -1,5 +1,7 @@
 Slick Willy Engine - code WIP
 
+LASTEST CHECKIN OF CODE HAS MANY MANY LEVEL COLLISION AND JUMPING BUGS - code is being worked on at present.
+
 For ZX Spectrum 48K
 
 Compile with sjasmplus v1.20.3
