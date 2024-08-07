@@ -54,7 +54,15 @@ FONTBASE	EQU	proportional_font-256
 TRUE	EQU 1
 FALSE	EQU 0
 
-UPDOWNKEYS	EQU TRUE
+ROPES					EQU FALSE
+CANFALLFROMANYHEIGHT	EQU TRUE
+
+; compile switches
+WALLLEFT	EQU FALSE	; JSW behaviour, set to TRUE for Manic Miner (bugged) wall collision to left
+WALLRIGHT	EQU FALSE	; ignore wall when moving right
+
+
+COLLISIONBOX	EQU	TRUE;FALSE;
 
 SILLYSPEED EQU FALSE;TRUE
 DBG_OCCUPIED EQU FALSE
@@ -76,14 +84,14 @@ TUNE3LOOPSTHEN2	EQU 0;1
 
 PACKED		EQU FALSE
 
-FPS25		EQU	FALSE
+FPS25		EQU	FALSE;TRUE;
 
 GAMEPLAYINGSATE		EQU 0
 GAMEOVERSTATE		EQU 1
 GAVEOVERINPROGRESS	EQU 2
 
 	IF	!FPS25
-TIMING		EQU TRUE;FALSE;
+TIMING		EQU FALSE;TRUE;
 	ELSE
 TIMING		EQU FALSE
 	ENDIF
@@ -496,6 +504,7 @@ mainloop:
 	ENDIF
 
 	halt
+
 	IF FPS25
 	halt
 	ENDIF
@@ -1464,7 +1473,7 @@ hud_init:
 
 hud_update:
 	IF TIMING
-	SETBORDER 2
+	SETBORDER 6
 	ENDIF
 
 	ld a, (willy_dance_idx)
@@ -2252,8 +2261,15 @@ parse_unpacked_level:
 	ld (game_state), a
 	ld (frame_counter), a
 
+	ld (jump_ctr), a
+
 	ld h, a
 	ld l, a
+	ld (sfx_jump), hl
+	ld (onrope), a
+	ld (willy_airborne), a
+	ld (willy_dead), a
+
 	ld (gfx_copyevent), hl
 
 	ld hl, erasecellslist
@@ -3991,12 +4007,14 @@ update_willy:
 
 
 .doneeraselists
+	; null terminate both lists
 	xor a
 	ld (de), a
 
 	exx
 	ld (de), a
 
+	IF 0
 	call read_keyboard
 	ld hl, willy_xpos
 	ld a, (hl)
@@ -4008,19 +4026,103 @@ update_willy:
 
 	ld (hl), a
 .doneupatepos
+	ENDIF
 
-	IF UPDOWNKEYS
+	ld hl, 0
+	ld (sfx_jump), hl
+
+	ld hl, (willy_colpos)
+	ld de, collision_map
+	add hl, de
+
+	; put the tile distribution table in the alt registers
+	exx
+	ld hl, (tile_dist_table)	; platformidx, spikyidx
+	ld de, (tile_dist_table+2)	; crumblyidx, lconveyoridx
+	ld bc, (tile_dist_table+4)	; rconveyoridx, bgtileidx
+	exx
+
+	; handle willy on a rope (none in MM)
+	IF ROPES
+	ld a, (onrope)
+	dec a
+	bit 7, a
+	jp z, movewilly
+	ENDIF
+
+	ld a, (willy_airborne)
+	dec a
+	jr nz, .notjumping
+
+	ld hl, jump50fps_tbl
+	ld a, (jump_ctr)
+	add l
+	ld l, a
+	ld b, (hl)
+
+	ld a, (jump_ctr)
+	inc a
+
+	ld (jump_ctr), a
+
 	ld hl, willy_ypos
 	ld a, (hl)
 	add b
-	cp -1
-	jr z, .doneupdateypos
-	cp 13*8+1
-	jr nc, .doneupdateypos
-
 	ld (hl), a
-.doneupdateypos
-	ENDIF
+.notjumping
+
+	ld hl, (willy_colpos)
+	ld de, collision_map+#40
+	add hl, de ; beneath willy's feet
+
+	; JSW checks for bottom of screen here
+	;bit 1, h
+	;jp nz, move_d
+
+	; crumbly platforms, TODO
+
+	; standing on a spiky platform, TODO
+
+	; check if nothing underneath willy
+	xor a
+	cp (hl)
+	inc hl ; deliberately avoid setting flags by using inc hl
+	jp nz, movewilly
+	cp (hl)
+	jp nz, movewilly
+
+.dofall
+	ld a, (willy_airborne)
+	dec a
+	jp z, checkmoving
+
+	ld hl, willystate
+	res 1, (hl)
+	ld a, (willy_airborne)
+	or a
+	jp z, fall2		; dropped off a ledge
+
+	inc a			; increment distance fallen
+	cp #10*2		; think this needs to be double for 50fps
+	jr nz, .notfelltoofar
+	ld a, #0C*2		; same with this
+
+.notfelltoofar:
+	ld (willy_airborne), a
+
+	; Queue fall SFX
+	rlca
+	rlca
+	rlca
+	rlca
+	ld h, a
+	ld l, #20
+	ld (sfx_jump), hl
+
+	ld a, (willy_ypos)
+	add 4; 8	; gravity is 4 at 50fps?
+	ld (willy_ypos), a
+
 
 	; since we only erase cells we left, if we entered a blank cell we need to set the attribs in that cell
 	; (just the attribs will do). Another list? It's at most 3 length (moved diagonally) if we check whether we already erased the cell...
@@ -4180,6 +4282,400 @@ update_willy_pos:
 
 	ret
 
+fall2:
+	ld a, 2
+	ld (willy_airborne), a
+	jp movewilly
+
+; called when we are able to move Willy (i.e. not during a jump, falling, etc.)
+movewilly:
+	ld e, #ff		; prep e with "not moving"
+
+	; rope movement
+	ld a, (onrope)
+	dec a
+	bit 7, a
+	jr z, .notonconveyor
+
+	; kill willy if fallen from a great height
+	ld a, (willy_airborne)
+	cp #0C*2 ; set to this when we are about to fall to our death
+	jp c, .notdead		; fallen too far?
+	ld hl, willy_dead
+
+	IF !CANFALLFROMANYHEIGHT
+	inc (hl)
+	ENDIF
+
+	jp update_willy_pos
+
+.notdead
+	xor a
+	ld (willy_airborne), a	; not airborne
+
+	; conveyor stuff goes here
+
+.notonconveyor
+
+	ld bc, #dffe		; yuiop
+	in a, (c)
+	and #1f
+	or #20
+	and e
+	ld e, a
+
+	; do movement at end of JSW
+	;ld a, (status)
+	;and #02
+	;rrca
+	;xor e
+	;ld e, a
+
+	ld bc, #fbfe
+	in a, (c)
+	and #1f
+	rlca
+	or #01
+	and e
+	ld e, a
+	ld b, #e7
+	in a, (c)
+	rrca
+	or #f7
+	and e
+	ld e, a
+	ld b, #ef
+	in a, (c)
+	or #fb
+	and e
+	ld e, a
+	in a, (c)
+	rrca
+	or #fb
+	and e
+	ld e, a
+
+	; joystick
+	ld a, (kempston)
+	or a
+	jr z, .nokempston
+	ld bc, #001f
+	in a, (c)
+	and #03
+	cpl
+	and e
+	ld e, a
+
+.nokempston
+	ld c, 0
+	ld a, e
+	and #2a
+	cp #2a
+	jr z, .pausecheck2
+	ld c, #04
+	xor a
+	ld (pausectr), a
+
+.pausecheck2
+	ld a, e
+	and #15
+	cp #15
+	jr z, .nopause
+	set 3, c
+	xor a
+	ld (pausectr), a
+
+.nopause
+	; update move direction flags
+	ld a, (willystate)
+	add a, c
+	ld c, a
+	ld b, 0
+	ld hl, willyleftrightmovementtbl
+	add hl, bc
+	ld a, (hl)
+	ld (willystate), a
+
+	; check for jump pressed
+	ld bc, #7efe
+	in a, (c)
+	and #1f
+	cp #1f
+	jr nz, .dojump
+	ld b, #ef
+	in a, (c)
+	bit 0, a	; 0 pressed?
+	jr z, .dojump
+	ld a, (kempston)
+	or a
+	jr z, checkmoving
+	ld bc, #001f
+	in a, (c)
+	bit 4, a
+	jr z, checkmoving
+
+.dojump
+	; JSW end sequence stuff
+	;ld a, (status)
+	;bit 1, a
+	;jr nz, checkmoving
+
+
+	xor a
+	ld (jump_ctr), a	; reset jump counter
+	ld (pausectr), a
+	inc a
+	ld (willy_airborne), a
+	
+	; jump pressed on rope
+	ld a, (onrope)
+	dec a
+	bit 7, a
+	jr nz, checkmoving
+	ld a, #f0
+	ld (onrope), a
+
+	ld a, (willy_ypos)
+	and #f0
+	ld (willy_ypos), a
+	ld hl, willystate
+
+	set 1, (hl)
+	jp update_willy_pos
+
+checkmoving:
+
+	ld a, (willystate)
+	and 2			; can't move?
+	jp z, update_willy_pos
+
+	; rope stuff again
+	ld a, (onrope)
+	dec a
+	bit 7, a
+	jp z, update_willy_pos
+
+	ld a, (willystate)
+	and 1
+	jp z, movingright
+	ld a, (willy_xpos)
+	and 7
+	;or a
+	jr z, willymoveleft
+	;dec a
+	;ld (willy_facing), a ; this is actually animframe
+	ld a, (willy_xpos)
+	dec a
+	ld (willy_xpos), a
+
+	ld a, -1
+	ld (willy_facing), a
+
+	jp update_willy_pos
+
+willymoveleft:			; l8fdc
+	ld a, (willy_airborne)
+	ld bc, #0000
+	or a
+	jr nz, .doneslopel
+	;ld hl, (willyc)	; position in colision map
+	; slope stuff
+	;ld a, (slope_dir)
+	;dec a
+	;or #a1
+	;xor #e0
+	;ld e, a
+	;ld d, 0
+	;add hl, de		;beneath feet
+	;ld a, (slope)
+	;cp (hl)		; standing on a slope?
+	;jr nz, .doneslopel
+	;ld bc, #0020		; +32 downwards slope
+	;ld a, (slope_dir)
+	;or a
+	;jr nz, .doneslopel
+	;ld bc, -32
+
+.doneslopel			
+	ld hl, (willy_colpos)
+	ld de, collision_map
+	add hl, de
+
+	; check move off screen to the left
+	;ld a, l
+	;and #1f
+	;jp z, move_l
+
+	add hl, bc		; potential new position
+	dec l			; left of willy's head
+	ld de, #20
+	add hl, de		; left of willys feet
+	;bit 4, (hl)		; is it a wall?
+	;ret nz			; yes, return
+	ld a, (hl)
+	cp 1
+	jp z, update_willy_pos
+
+
+	ld a, (willy_ypos)
+	;sra c
+	add a, c
+	ld b, a
+	and #0f
+	jr z, .not3linesl	; not occupying 3 character lines
+	add hl, de		; collision 3rd line
+	;bit 4, (hl)		; is it a wall?
+	;ret nz			; yes, return
+	ld a, (hl)
+	cp 1
+	jp z, update_willy_pos
+	or a			; clear carry
+	sbc hl, de		; move back up a line
+
+.not3linesl
+	or a			; clear carry
+	sbc hl, de
+	
+	IF WALLLEFT		; check for wall to left, 0 in JSW, 1 in Manic Miner
+	;bit 4, (hl)
+	ld a, (hl)
+	cp 1
+	jp z, update_willy_pos
+	ld (willy_colpos), hl		; update willy pos
+	;ld a, #7		; set anim frame to 7
+	ld a, (willy_xpos)
+	;or 7
+	dec a
+	ld (willy_xpos), a
+	jp donemove
+	ELSE
+	ld (willy_colpos), hl
+	ld a, b
+	ld (willy_ypos), a
+	ld a, (willy_xpos)
+	dec a
+	ld (willy_xpos), a
+
+	ld a, -1
+	ld (willy_facing), a
+
+	jp update_willy_pos
+	ENDIF
+
+movingright:			
+	;ld a, (willy_facing) ; this is actually animframe
+	;cp 7
+	ld a, (willy_xpos)
+	and 7
+	cp 7
+	jr z, willymoveright
+	ld a, (willy_xpos)
+	inc a
+	ld (willy_xpos), a
+
+	ld a, 1
+	ld (willy_facing), a
+
+	jp update_willy_pos
+
+willymoveright:
+	ld a, (willy_airborne)
+	ld bc, 0
+	or a
+	jr nz, .donesloper
+	;ld hl, (willyc)	; position in colision map
+	; slope stuff
+	;ld a, (slope_dir)
+	;dec a
+	;or #9d
+	;xor #bf
+	;ld e, a
+	;ld d, 0
+	;add hl, de		;beneath feet
+	;ld a, (slope)
+	;cp (hl)		; standing on a slope?
+	;jr nz, .donesloper
+	;ld bc, #0020		; +32 downwards slope
+	;ld a, (slope_dir)
+	;or a
+	;jr nz, .donesloper
+	;ld bc, -32
+
+.donesloper
+	ld hl, (willy_colpos)
+	ld de, collision_map
+	add hl, de
+	add hl, bc
+	inc l
+	inc l			; right of willys head
+
+	; check move off screen to the right
+	;ld a, l
+	;and #1f
+	;jp z, move_r		; move right 1 screen
+
+	ld de, #0020
+	add hl, de		; cell right of willys legs
+	;bit 4, (hl)		; wall?
+	;ret nz			; yes, return
+	ld a, (hl)
+	cp 1
+	jp z, update_willy_pos
+
+	ld a, (willy_ypos)
+	;sra c
+	add a, c
+	ld b, a
+	and 7;#0f
+	jr z, .not3linesr	; not occupying 3 character lines
+	add hl, de
+	;bit 4, (hl)		; wall?
+	cp 1 ; FOR NOW... assume only 1 wall
+	jp z, update_willy_pos
+	or a			; clear carry
+	sbc hl, de		; move back up a line
+
+.not3linesr
+	or a
+	sbc hl, de
+	;bit 4, (hl)
+	ld a, (hl)
+	cp 1
+
+	IF WALLRIGHT
+	;nop
+	ELSE
+	jp z, update_willy_pos
+	ENDIF
+
+	; don't think I need to do this... handled via xpos and ypos
+	;dec hl
+	;ld a, h
+	;and 1 ; in range 0-511
+	;ld h, a
+	;ld (willy_colpos), hl
+	;xor a
+
+
+	ld a, (willy_xpos)
+	inc a
+	ld (willy_xpos), a
+
+	ld a, 1
+	ld (willy_facing), a
+
+donemove:
+	;ld (willy_facing), a	; this is actually animframe
+	;ld (willy_xpos), a
+	;ld a, (willy_xpos)
+	;inc a
+	;ld (willy_xpos), a
+	ld a, b
+	ld (willy_ypos), a		; update y pos
+	jp update_willy_pos
+
+
+	IF 0
 ; at exit, C contains 1 if we pressed right and -1 if we pressed left
 read_keyboard:
 	; Read these ports to scan keyboard
@@ -4198,22 +4694,14 @@ read_keyboard:
 
 	ld bc, 0
 
-	IF UPDOWNKEYS
-	; are we pressing P?
-	ld a, #DF
+	; check all bottom row keys at once
+	ld a, #7E
 	in a, (#FE)
-	bit 0, a
-	jr nz, .notpressingP
-	dec b
-.notpressingP
-	; are we pressing L?
-	ld a, #BF
-	in a, (#FE)
-	bit 1, a
-	jr nz, .notpressingL
+	and #1F
+	cp #1F
+	jr z, .notpressingjump
 	inc b
-.notpressingL
-	ENDIF
+.notpressingjump
 
 	; are we pressing W?
 	ld a, #FB
@@ -4233,6 +4721,7 @@ read_keyboard:
 	ld hl, willy_facing
 	ld (hl), c
 	ret
+	ENDIF
 
 
 ; A: starting cell for solar
@@ -4445,31 +4934,6 @@ clear_playarea:
 	ld (hl), b ; since B=0 here
 	ld bc, 4096-1
 	ldir
-	ret
-
-; B: row (in character cells, so [0-23])
-; C: column
-erase8x8a:
-	ld a, b
-	add b ; A = B*2
-	ld h, tbl_rows/256 ; high byte of screen address lookup table. Aligned 256 so low byte will be just row*2
-	ld l, a ; index into table 
-	ld a, (hl) ; low byte of screen address
-	inc l ; point HL to high byte of screen address
-	ld h, (hl) ; read high byte of screen address
-	add c ; add on column to low byte of screen address
-	ld l, a ; and write it back. HL now holds correct screen address
-	; so we now know the address...
-; HL: screen address
-erase8x8aKnowAddr:
-	xor a
-
-	REPT 7
-		ld (hl), a
-		inc h ; next row of pixels down
-	ENDR
-
-	ld (hl), a
 	ret
 
 draw_willy_2rows:
@@ -5065,7 +5529,7 @@ collision_map:
 
 	ALIGN 256
 proportional_font	;db #00, #00, #00, #00, #00, #00, #00, #00 ; space
-	db 4;3;5 ; width
+	db 3;4;5 ; width
 
 	IF MAYBE8TALL
 	dw proportional_font-256+'j'*8+8;7 ; address of last row+1 of character in font
@@ -6211,7 +6675,7 @@ Final_Barrier_ImageData:
 
 	ALIGN 256
 
-	IF 1;0
+	IF !COLLISIONBOX
 gfx_gnewwilly0
 			dg	.....##......... ;0
 			dg	..##.##......... ;1
@@ -6501,6 +6965,56 @@ gfx_gnewwilly15
 			dg	........##.###.. ;15
 	ELSE
 gfx_gnewwilly0
+
+_8200	DEFB $06,$00,$3E,$00,$7C,$00,$34,$00,$3E,$00,$3C,$00,$18,$00,$3C,$00	
+_8210	DEFB $7E,$00,$7E,$00,$F7,$00,$FB,$00,$3C,$00,$76,$00,$6E,$00,$77,$00	
+
+_8200x	DEFB $06,$00,$3E,$00,$7C,$00,$34,$00,$3E,$00,$3C,$00,$18,$00,$3C,$00	
+_8210x	DEFB $7E,$00,$7E,$00,$F7,$00,$FB,$00,$3C,$00,$76,$00,$6E,$00,$77,$00	
+
+_8220	DEFB $01,$80,$0F,$80,$1F,$00,$0D,$00,$0F,$80,$0F,$00,$06,$00,$0F,$00	
+_8230	DEFB $1B,$80,$1B,$80,$1B,$80,$1D,$80,$0F,$00,$06,$00,$06,$00,$07,$00	
+
+_8220x	DEFB $01,$80,$0F,$80,$1F,$00,$0D,$00,$0F,$80,$0F,$00,$06,$00,$0F,$00	
+_8230x	DEFB $1B,$80,$1B,$80,$1B,$80,$1D,$80,$0F,$00,$06,$00,$06,$00,$07,$00	
+
+_8240	DEFB $00,$60,$03,$E0,$07,$C0,$03,$40,$03,$E0,$03,$C0,$01,$80,$03,$C0	
+_8250	DEFB $07,$E0,$07,$E0,$0F,$70,$0F,$B0,$03,$C0,$07,$60,$06,$E0,$07,$70	
+
+_8240x	DEFB $00,$60,$03,$E0,$07,$C0,$03,$40,$03,$E0,$03,$C0,$01,$80,$03,$C0	
+_8250x	DEFB $07,$E0,$07,$E0,$0F,$70,$0F,$B0,$03,$C0,$07,$60,$06,$E0,$07,$70	
+
+_8260	DEFB $00,$18,$00,$F8,$01,$F0,$00,$D0,$00,$F8,$00,$F0,$00,$60,$00,$F0	
+_8270	DEFB $01,$F8,$03,$FC,$07,$FE,$06,$F6,$00,$F8,$01,$DA,$03,$0E,$03,$84	
+
+_8260x	DEFB $00,$18,$00,$F8,$01,$F0,$00,$D0,$00,$F8,$00,$F0,$00,$60,$00,$F0	
+_8270x	DEFB $01,$F8,$03,$FC,$07,$FE,$06,$F6,$00,$F8,$01,$DA,$03,$0E,$03,$84	
+
+_8280	DEFB $18,$00,$1F,$00,$0F,$80,$0B,$00,$1F,$00,$0F,$00,$06,$00,$0F,$00	
+_8290	DEFB $1F,$80,$3F,$C0,$7F,$E0,$6F,$60,$1F,$00,$5B,$80,$70,$C0,$21,$C0	
+
+_8280x	DEFB $18,$00,$1F,$00,$0F,$80,$0B,$00,$1F,$00,$0F,$00,$06,$00,$0F,$00	
+_8290x	DEFB $1F,$80,$3F,$C0,$7F,$E0,$6F,$60,$1F,$00,$5B,$80,$70,$C0,$21,$C0	
+
+_82A0	DEFB $06,$00,$07,$C0,$03,$E0,$02,$C0,$07,$C0,$03,$C0,$01,$80,$03,$C0	
+_82B0	DEFB $07,$E0,$07,$E0,$0E,$F0,$0D,$F0,$03,$C0,$06,$E0,$07,$60,$0E,$E0	
+
+_82A0x	DEFB $06,$00,$07,$C0,$03,$E0,$02,$C0,$07,$C0,$03,$C0,$01,$80,$03,$C0	
+_82B0x	DEFB $07,$E0,$07,$E0,$0E,$F0,$0D,$F0,$03,$C0,$06,$E0,$07,$60,$0E,$E0	
+
+_82C0	DEFB $01,$80,$01,$F0,$00,$F8,$00,$B0,$01,$F0,$00,$F0,$00,$60,$00,$F0	
+_82D0	DEFB $01,$F8,$01,$D8,$01,$D8,$01,$B8,$00,$F0,$00,$60,$00,$60,$00,$E0	
+
+_82C0x	DEFB $01,$80,$01,$F0,$00,$F8,$00,$B0,$01,$F0,$00,$F0,$00,$60,$00,$F0	
+_82D0x	DEFB $01,$F8,$01,$D8,$01,$D8,$01,$B8,$00,$F0,$00,$60,$00,$60,$00,$E0	
+
+_82E0	DEFB $00,$60,$00,$7C,$00,$3E,$00,$2C,$00,$7C,$00,$3C,$00,$18,$00,$3C	
+_82F0	DEFB $00,$7E,$00,$7E,$00,$EF,$00,$DF,$00,$3C,$00,$6E,$00,$76,$00,$EE	
+
+_82E0x	DEFB $00,$60,$00,$7C,$00,$3E,$00,$2C,$00,$7C,$00,$3C,$00,$18,$00,$3C	
+_82F0x	DEFB $00,$7E,$00,$7E,$00,$EF,$00,$DF,$00,$3C,$00,$6E,$00,$76,$00,$EE	
+	IF 0
+gfx_gnewwilly0
 			dg	########........ ;0
 			dg	#......#........ ;1
 			dg	#......#........ ;2
@@ -6532,8 +7046,8 @@ gfx_gnewwilly1
 			dg	.#.......#...... ;10
 			dg	.#.......#...... ;11
 			dg	.#.......#...... ;12
-			dg	.#.......#...... ;13
-			dg	.#.......#...... ;14
+			dg	.##......#...... ;13
+			dg	.##......#...... ;14
 			dg	.#########...... ;15
 
 gfx_gnewwilly2
@@ -6550,8 +7064,8 @@ gfx_gnewwilly2
 			dg	..#.......#..... ;10
 			dg	..#.......#..... ;11
 			dg	..#.......#..... ;12
-			dg	..#.......#..... ;13
-			dg	..#.......#..... ;14
+			dg	..###.....#..... ;13
+			dg	..###.....#..... ;14
 			dg	..#########..... ;15
 
 gfx_gnewwilly3
@@ -6568,8 +7082,8 @@ gfx_gnewwilly3
 			dg	...#.......#.... ;10
 			dg	...#.......#.... ;11
 			dg	...#.......#.... ;12
-			dg	...#.......#.... ;13
-			dg	...#.......#.... ;14
+			dg	...####....#.... ;13
+			dg	...####....#.... ;14
 			dg	...#########.... ;15
 
 gfx_gnewwilly4
@@ -6586,8 +7100,8 @@ gfx_gnewwilly4
 			dg	....#.......#... ;10
 			dg	....#.......#... ;11
 			dg	....#.......#... ;12
-			dg	....#.......#... ;13
-			dg	....#.......#... ;14
+			dg	....#####...#... ;13
+			dg	....#####...#... ;14
 			dg	....#########... ;15
 
 gfx_gnewwilly5
@@ -6604,8 +7118,8 @@ gfx_gnewwilly5
 			dg	.....#.......#.. ;10
 			dg	.....#.......#.. ;11
 			dg	.....#.......#.. ;12
-			dg	.....#.......#.. ;13
-			dg	.....#.......#.. ;14
+			dg	.....######..#.. ;13
+			dg	.....######..#.. ;14
 			dg	.....#########.. ;15
 
 gfx_gnewwilly6
@@ -6622,8 +7136,8 @@ gfx_gnewwilly6
 			dg	......#.......#. ;10
 			dg	......#.......#. ;11
 			dg	......#.......#. ;12
-			dg	......#.......#. ;13
-			dg	......#.......#. ;14
+			dg	......#######.#. ;13
+			dg	......#######.#. ;14
 			dg	......#########. ;15
 
 gfx_gnewwilly7
@@ -6640,8 +7154,8 @@ gfx_gnewwilly7
 			dg	.......#.......# ;10
 			dg	.......#.......# ;11
 			dg	.......#.......# ;12
-			dg	.......#.......# ;13
-			dg	.......#.......# ;14
+			dg	.......######### ;13
+			dg	.......######### ;14
 			dg	.......######### ;15
 
 gfx_gnewwilly8
@@ -6658,8 +7172,8 @@ gfx_gnewwilly8
 			dg	#.......#....... ;10
 			dg	#.......#....... ;11
 			dg	#.......#....... ;12
-			dg	#.......#....... ;13
-			dg	#.......#....... ;14
+			dg	#########....... ;13
+			dg	#########....... ;14
 			dg	#########....... ;15
 
 gfx_gnewwilly9
@@ -6676,8 +7190,8 @@ gfx_gnewwilly9
 			dg	.#.......#...... ;10
 			dg	.#.......#...... ;11
 			dg	.#.......#...... ;12
-			dg	.#.......#...... ;13
-			dg	.#.......#...... ;14
+			dg	.#.#######...... ;13
+			dg	.#.#######...... ;14
 			dg	.#########...... ;15
 
 gfx_gnewwilly10
@@ -6694,8 +7208,8 @@ gfx_gnewwilly10
 			dg	..#.......#..... ;10
 			dg	..#.......#..... ;11
 			dg	..#.......#..... ;12
-			dg	..#.......#..... ;13
-			dg	..#.......#..... ;14
+			dg	..#..######..... ;13
+			dg	..#..######..... ;14
 			dg	..#########..... ;15
 
 gfx_gnewwilly11
@@ -6712,8 +7226,8 @@ gfx_gnewwilly11
 			dg	...#.......#.... ;10
 			dg	...#.......#.... ;11
 			dg	...#.......#.... ;12
-			dg	...#.......#.... ;13
-			dg	...#.......#.... ;14
+			dg	...#...#####.... ;13
+			dg	...#...#####.... ;14
 			dg	...#########.... ;15
 
 gfx_gnewwilly12
@@ -6730,8 +7244,8 @@ gfx_gnewwilly12
 			dg	....#.......#... ;10
 			dg	....#.......#... ;11
 			dg	....#.......#... ;12
-			dg	....#.......#... ;13
-			dg	....#.......#... ;14
+			dg	....#....####... ;13
+			dg	....#....####... ;14
 			dg	....#########... ;15
 
 gfx_gnewwilly13
@@ -6748,8 +7262,8 @@ gfx_gnewwilly13
 			dg	.....#.......#.. ;10
 			dg	.....#.......#.. ;11
 			dg	.....#.......#.. ;12
-			dg	.....#.......#.. ;13
-			dg	.....#.......#.. ;14
+			dg	.....#.....###.. ;13
+			dg	.....#.....###.. ;14
 			dg	.....#########.. ;15
 
 gfx_gnewwilly14
@@ -6766,8 +7280,8 @@ gfx_gnewwilly14
 			dg	......#.......#. ;10
 			dg	......#.......#. ;11
 			dg	......#.......#. ;12
-			dg	......#.......#. ;13
-			dg	......#.......#. ;14
+			dg	......#......##. ;13
+			dg	......#......##. ;14
 			dg	......#########. ;15
 
 gfx_gnewwilly15
@@ -6787,6 +7301,7 @@ gfx_gnewwilly15
 			dg	........#......# ;13
 			dg	........#......# ;14
 			dg	........######## ;15
+	ENDIF
 	ENDIF
 
 horizontal_guardians_page:
@@ -10266,6 +10781,25 @@ tokenise_buff BLOCK 64
 ; WORD scraddress
 redrawcellslist	BLOCK 4*6+1
 
+jump50fps_tbl:
+	db -2, -2, -2, -2, -1, -2, -1, -2, -1, -1, -1, -1, 0, -1, 0, -1, 0, 0
+	db 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 2, 1, 2, 1, 2, 2, 2, 2
+
+JUMPTBLSIZE	EQU $-jump50fps_tbl
+	
+	DISPLAY "Jump table size: ", /A, JUMPTBLSIZE
+
+sfx_jump	dw 0
+onrope		db 0
+willy_airborne	db 0
+willy_dead	db 0
+willystate	db 0
+; willy left right movement table
+willyleftrightmovementtbl	db 0, 1, 0, 1, 1, 3, 1, 3, 2, 0, 2, 0, 0, 1, 2, 3
+kempston	db 0
+pausectr	db 0
+
+
 	DISPLAY "Gap before tbl_rows: ", /A, tbl_rows-$
 
 	ALIGN 256
@@ -10422,6 +10956,9 @@ add_pr_letterwidth:
 
 erasecellslist:
 	BLOCK 6*2+1 ; max 6 tiles behind willy to be erased per frame
+
+jump_ctr		db 0
+;willy_jumping	db 0
 
 	DISPLAY "Gap before level_tiles: ", /A, level_tiles-$
 
@@ -12539,7 +13076,7 @@ Amoebatrons_Revenge:
 
 	IPB_LAST			6, 0, 1
 	IF BEAMFLICKERTEST
-	VGUARDIAN 25, 0, 3
+	VGUARDIAN 25, 3, 3
 	ELSE
 	VGUARDIAN 25, 8, 3
 	ENDIF
