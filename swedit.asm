@@ -96,7 +96,7 @@ TIMING		EQU FALSE;TRUE;
 TIMING		EQU FALSE
 	ENDIF
 
-BEAMFLICKERTEST	EQU TRUE;FALSE
+BEAMFLICKERTEST	EQU FALSE;TRUE;
 
 AIRTICKS	EQU 16
 
@@ -1704,11 +1704,14 @@ add_score:
 	ret
 
 ; HL: pointer last digit of timer string
+; adds 0.02 seconds to the timer
 add_time:
 	ld a, (hl)
 	inc a
 	ld b, 7
 
+	; THIS ONLY WORKS BECAUSE 2 IS A DIVISOR OF 10
+	; It will need to change if I do a 50FPS version since 4 is not a divisor of 10
 .nextdigit
 	inc a
 	ld (hl), a
@@ -1725,7 +1728,7 @@ add_time:
 	ret c
 
 .overflow
-	ld (hl), 0
+	ld (hl), 0 ; THIS IS THE BIT THAT NEEDS CHANGING, needs to go from 8 to 2 instead of 0
 	dec hl
 	dec b
 	ret z
@@ -2349,6 +2352,13 @@ parse_unpacked_level:
 
 	ld a, c
 	ld (willy_facing), a
+	inc a
+	jr nz, .dontadjustx
+	ld a, (willy_xpos)
+	add 7
+	ld (willy_xpos), a
+.dontadjustx
+
 
 	exx
 	call update_willy_pos
@@ -4014,26 +4024,14 @@ update_willy:
 	exx
 	ld (de), a
 
-	IF 0
-	call read_keyboard
-	ld hl, willy_xpos
-	ld a, (hl)
-	add c
-	cp 8
-	jr c, .doneupatepos
-	cp 240
-	jr nc, .doneupatepos
-
-	ld (hl), a
-.doneupatepos
-	ENDIF
-
 	ld hl, 0
 	ld (sfx_jump), hl
 
 	ld hl, (willy_colpos)
 	ld de, collision_map
 	add hl, de
+
+	ld (willy_coladdr), hl
 
 	; put the tile distribution table in the alt registers
 	exx
@@ -4051,8 +4049,10 @@ update_willy:
 	ENDIF
 
 	ld a, (willy_airborne)
-	dec a
-	jr nz, .notjumping
+	;dec a
+	;jr nz, .notjumping
+	cp 1
+	jr nz, notjumping ; can probably replace with above 2 lines, but I have double jump bug to fix first
 
 	ld hl, jump50fps_tbl
 	ld a, (jump_ctr)
@@ -4060,19 +4060,63 @@ update_willy:
 	ld l, a
 	ld b, (hl)
 
+	ld hl, willy_ypos
+	ld a, (hl)
+	add b
+	ld (hl), a
+
+	; sfx goes here
+
+	ld a, (willy_xpos)
+	and ~7
+	ld l, a
+
+
+	ld a, (willy_ypos)
+	;ld c, a
+	and ~7
+	rrca
+	rrca
+	rrca
+	
+	; now shift that into top bits of l
+	REPT 3
+	rrca
+	rr l
+	ENDR
+	and 3
+	ld h, a
+
+	ld bc, collision_map
+	add hl, bc
+
+	ld (willy_coladdr), hl
+
+	ld a, (hl)
+	cp 1 ; wall
+	jp z, stopjump
+	inc l
+	ld a, (hl)
+	cp 1
+	jp z, stopjump
+
 	ld a, (jump_ctr)
 	inc a
 
 	ld (jump_ctr), a
 
-	ld hl, willy_ypos
-	ld a, (hl)
-	add b
-	ld (hl), a
-.notjumping
+	cp #24 ; started falling?
+	jp z, fall6
 
-	ld hl, (willy_colpos)
-	ld de, collision_map+#40
+	cp #20
+	jr z, notjumping
+	cp #0D*2
+	jp nz, checkmoving
+
+notjumping
+
+	ld hl, (willy_coladdr)
+	ld de, #40
 	add hl, de ; beneath willy's feet
 
 	; JSW checks for bottom of screen here
@@ -4093,7 +4137,8 @@ update_willy:
 
 .dofall
 	ld a, (willy_airborne)
-	dec a
+	;dec a
+	cp 1
 	jp z, checkmoving
 
 	ld hl, willystate
@@ -4101,6 +4146,8 @@ update_willy:
 	ld a, (willy_airborne)
 	or a
 	jp z, fall2		; dropped off a ledge
+
+falling:
 
 	inc a			; increment distance fallen
 	cp #10*2		; think this needs to be double for 50fps
@@ -4120,7 +4167,7 @@ update_willy:
 	ld (sfx_jump), hl
 
 	ld a, (willy_ypos)
-	add 4; 8	; gravity is 4 at 50fps?
+	add 2; gravity is 2 at 50fps?
 	ld (willy_ypos), a
 
 
@@ -4282,10 +4329,30 @@ update_willy_pos:
 
 	ret
 
-fall2:
-	ld a, 2
+fall6:
+	ld a, 3;6
 	ld (willy_airborne), a
-	jp movewilly
+	;jp falling
+	jp update_willy_pos
+
+;	jp movewilly
+
+fall2:
+	ld a, 1;2
+	ld (willy_airborne), a
+	jp falling
+
+stopjump:
+	ld a, (willy_ypos)
+	add 4;8
+	and ~7			; align to cell below
+	ld (willy_ypos), a
+	;call collision_from_willypos
+	ld a, 2
+	ld (willy_airborne), a	; just started falling
+	ld hl, willystate
+	res 1, (hl)
+	jp update_willy_pos
 
 ; called when we are able to move Willy (i.e. not during a jump, falling, etc.)
 movewilly:
@@ -4303,7 +4370,10 @@ movewilly:
 	jp c, .notdead		; fallen too far?
 	ld hl, willy_dead
 
-	IF !CANFALLFROMANYHEIGHT
+	IF CANFALLFROMANYHEIGHT
+	xor a
+	ld (willy_airborne), a
+	ELSE
 	inc (hl)
 	ENDIF
 
@@ -4497,9 +4567,9 @@ willymoveleft:			; l8fdc
 	;ld bc, -32
 
 .doneslopel			
-	ld hl, (willy_colpos)
-	ld de, collision_map
-	add hl, de
+	ld hl, (willy_coladdr)
+	;ld de, collision_map
+	;add hl, de
 
 	; check move off screen to the left
 	;ld a, l
@@ -4521,7 +4591,8 @@ willymoveleft:			; l8fdc
 	;sra c
 	add a, c
 	ld b, a
-	and #0f
+	;and #0f
+	and 7
 	jr z, .not3linesl	; not occupying 3 character lines
 	add hl, de		; collision 3rd line
 	;bit 4, (hl)		; is it a wall?
@@ -4541,15 +4612,17 @@ willymoveleft:			; l8fdc
 	ld a, (hl)
 	cp 1
 	jp z, update_willy_pos
-	ld (willy_colpos), hl		; update willy pos
+	;ld (willy_colpos), hl		; update willy pos
 	;ld a, #7		; set anim frame to 7
 	ld a, (willy_xpos)
 	;or 7
 	dec a
 	ld (willy_xpos), a
+	ld a, -1
+	ld (willy_facing), a
 	jp donemove
 	ELSE
-	ld (willy_colpos), hl
+	;ld (willy_colpos), hl
 	ld a, b
 	ld (willy_ypos), a
 	ld a, (willy_xpos)
@@ -4602,9 +4675,9 @@ willymoveright:
 	;ld bc, -32
 
 .donesloper
-	ld hl, (willy_colpos)
-	ld de, collision_map
-	add hl, de
+	ld hl, (willy_coladdr)
+	;ld de, collision_map
+	;add hl, de
 	add hl, bc
 	inc l
 	inc l			; right of willys head
@@ -4630,6 +4703,7 @@ willymoveright:
 	jr z, .not3linesr	; not occupying 3 character lines
 	add hl, de
 	;bit 4, (hl)		; wall?
+	ld a, (hl)
 	cp 1 ; FOR NOW... assume only 1 wall
 	jp z, update_willy_pos
 	or a			; clear carry
@@ -10821,6 +10895,7 @@ tile_dist_table:
 	TILEDISTTBL
 
 willy_colpos	dw 0
+willy_coladdr	dw 0
 willy_xpos	db 0
 willy_ypos	db 0
 
@@ -13022,7 +13097,7 @@ Amoebatrons_Revenge:
 	db 1	; number of keys
 
 	IF !PACKED
-	XY 30, 13+16 ; willy start pos/facing
+	XY 29, 13+16 ; willy start pos/facing
 	db 29, 0 ; exit position
 	IPB 6, 1, 0 ; exit colour
 	db 1 ; border colour
