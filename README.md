@@ -1,6 +1,7 @@
 Slick Willy Engine - code WIP
 
-LASTEST CHECKIN OF CODE HAS MANY MANY LEVEL COLLISION AND JUMPING BUGS - code is being worked on at present.
+Most level collision bugs fixed. There seem to be some wall collision bugs remaining.
+You can jump off the top of the level in Endorian Forest because the spiky plants don't kill you.
 
 For ZX Spectrum 48K
 
