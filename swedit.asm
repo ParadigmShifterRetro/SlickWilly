@@ -2992,201 +2992,6 @@ parse_gfxcopy:
 	pop hl
 	ret
 
-parse_guardian_data:
-	ld ix, guardian0
-	xor a
-	ld (num_guardians), a
-	ld a, (hl) ; exit and guardian flags
-	ld b, a
-	bit HAS_VGUARDIAN_BIT, a
-	jr z, .novguardians
-
-	ld d, VGUARDIANPAGE/256
-	call get_guardian_type
-
-.morevguardiandata
-
-	call get_guardian_attribs
-
-	; (hl) = initial ypos
-	ld a, (hl)
-
-	ld (ix+GUARDIAN_DATA.vgy), a
-
-	; I shouldn't use exx here if I want to reserve that for bitstream data hmm
-	exx
-	ld e, a
-	and ~7
-	rrca
-	rrca
-
-	AROWX2TOSCRROWADDR
-
-	ld a, e
-	and 7
-	add h
-	ld h, a
-	exx
-
-	inc hl ; initial xpos and frame
-	ld a, (hl) ; add on xpos
-	and #3F ; mask out frame
-
-	exx
-	add l
-
-	ld (ix+GUARDIAN_DATA.scraddr), a
-	ld a, h
-	ld (ix+GUARDIAN_DATA.scraddr+1), a
-	exx
-
-	ld a, (hl)
-	and #C0 ; frame
-	rrca ; frame*32
-	ld (ix+GUARDIAN_DATA.frame), a
-
-	inc hl ; miny
-	ld a, (hl)
-	ld (ix+GUARDIAN_DATA.minaddr), a
-
-	inc hl ; maxy
-	ld a, (hl)
-	ld (ix+GUARDIAN_DATA.maxaddr), a
-
-	inc hl ; speed/flags
-	ld a, (hl)
-	and VGVELMASK ; mask out flags
-	REPT VGVELSHIFT
-	sra a
-	ENDR
-	ld (ix+GUARDIAN_DATA.yvel), a
-
-	ld a, (hl)
-	and VGFLAGSMASK
-	ld (ix+GUARDIAN_DATA.flags), a
-
-	call bump_guardian_ptr
-	jp z, .morevguardiandata
-
-.novguardians
-	bit HAS_HGUARDIAN_BIT, b
-	;jr z, .nohguardians
-	ret z
-
-	ld d, HGUARDIANPAGE/256
-	call get_guardian_type
-
-.morehguardiandata
-
-	call get_guardian_attribs
-
-	ld e, (hl)
-	inc hl ; xy and flags
-	ld a, (hl)
-	ld d, 0 ; flags
-	bit (ISHALFSPEEDBIT-8), a
-	jr z, .nothalfspeed
-	set HALFSPEEDFLAGBIT, d
-.nothalfspeed
-	bit (IS4FRAMEBIT-8), a
-	jr z, .not4frame
-	set IS4FRAMEFLAGBIT, d
-.not4frame
-	ld (ix+GUARDIAN_DATA.flags), d
-	and 7 ; mask out flags
-	ld d, a
-	push hl
-	ld hl, ATTRIBS
-	add hl, de
-
-
-	ATTRIBSTOSCR h
-	ld e, l
-	ld d, a ; bag scraddr
-	ld (ix+GUARDIAN_DATA.scraddr+1), a
-	ld a, l
-	ld (ix+GUARDIAN_DATA.scraddr), a
-
-	pop hl
-
-	ld a, (hl)
-	and HGFRAMEMASK
-	ld (ix+GUARDIAN_DATA.frame), a
-
-	inc hl ; path min
-	ld a, e
-	and ~31
-	ld e, a
-	ld a, (hl)
-	or e
-
-	ld (ix+GUARDIAN_DATA.minaddr), a
-
-	inc hl ; path max
-	ld a, e
-	and ~31
-	ld e, a
-	ld a, (hl)
-	or e
-
-	ld (ix+GUARDIAN_DATA.maxaddr), a
-
-	call bump_guardian_ptr
-	jp z, .morehguardiandata
-
-.nohguardians
-
-	ret
-
-; D: guardian base page
-get_guardian_type:
-	inc hl ; guardian type
-
-	ld a, (hl)
-	and #7F ; mask out is last flag
-	rra ; shift down one
-
-	ld e, 0
-	rr e ; carry in high bit
-	;add HGUARDIANPAGE/256
-	add d
-	ld d, a
-	ret
-
-; DE - guardian gfx (from get_guardian type call)
-get_guardian_attribs:
-	ld (ix+GUARDIAN_DATA.gfx), d ; high byte of guardian pointer
-	ld (ix+1+GUARDIAN_DATA.gfx), e ; low byte of guardian pointer
-
-	ex de, hl
-	ld hl, num_guardians
-	inc (hl)
-	ex de, hl
-
-	inc hl ; attrib
-	ld a, (hl)
-	ld c, a ; last one in high bit
-	and #7F ; mask out flag
-	ld (ix+GUARDIAN_DATA.attrib), a
-
-	inc hl
-	ret
-
-; set up pointer for reading next guardian data
-bump_guardian_ptr:
-	ld d, (ix+GUARDIAN_DATA.gfx) ; low byte of guardian pointer
-	ld e, (ix+1+GUARDIAN_DATA.gfx) ; highbyte of guardian pointer
-
-	push de
-	ld de, GUARDIAN_DATA
-	add ix, de
-	pop de
-
-	bit 7, c
-	ret
-
-	DISPLAY "parse_guardian_data size: ",/A, $-parse_guardian_data
-
 draw_level:
 
 	ld hl, collision_map
@@ -4145,9 +3950,11 @@ update_willy:
 	; null terminate both lists
 	xor a
 	ld (de), a
+	ld (eraselistptr), de
 
 	exx
 	ld (de), a
+	ld (redrawlistptr), de
 
 	ld hl, 0
 	ld (sfx_jump), hl
@@ -4248,14 +4055,163 @@ notjumping
 	;bit 1, h
 	;jp nz, move_d
 
-	; crumbly platforms, TODO
+	; crumbly platforms
 
+	ld a, (willy_airborne) ; just landed?
+	or a
+	jr nz, .docrumblycheck
+	ld a, (ongroundtime)
+	and 1
+	jp nz, .oddongroundtime ; only do this every other frame when standing on ground
+.docrumblycheck
+	ld a, (hl)
+	bit 7, a
+	jr z, .notcrumblyl
+
+	add 16
+	jr c, .erasel
+
+	ld (hl), a
+	and #70
+	rrca
+	rrca
+	rrca
+	rrca
+	ld c, a
+	ld a, (hl)
+
+	push hl
+	ld h, level_tiles/256
+	and 15
+	rlca
+	ld l, a
+
+	ld de, (redrawlistptr)
+	ld a, (hl)
+	inc l
+	ld b, (hl)
+
+	ex de, hl
+	ld (hl), b
+	inc l
+	sub c
+	ld (hl), a
+	inc l
+	ex de, hl
+
+	pop hl
+	push hl
+	ld bc, ATTRIBS-collision_map
+	add hl, bc
+	ATTRIBSTOSCR h
+	ex de, hl
+	ld (hl), a
+	inc l
+	ld (hl), e
+	inc l
+	ld (hl), 0
+	ld (redrawlistptr), hl
+	pop hl
+	jr .notcrumblyl
+
+.erasel
+	xor a
+	ld (hl), a
+	push hl
+	ld de, (eraselistptr)
+	ld bc, ATTRIBS-collision_map
+	add hl, bc
+	ATTRIBSTOSCR h
+	ex de, hl
+	ld (hl), a
+	inc l
+	ld (hl), e
+	inc l
+	ld (hl), 0
+	ld (eraselistptr), hl
+	pop hl
+
+.notcrumblyl
+	inc l
+	ld a, (hl)
+	bit 7, a
+	jr z, .notcrumblyr
+
+	add 16
+	jr c, .eraser
+
+	ld (hl), a
+	and #70
+	rrca
+	rrca
+	rrca
+	rrca
+	ld c, a
+	ld a, (hl)
+
+	push hl
+	ld h, level_tiles/256
+	and 15
+	rlca
+	ld l, a
+
+	ld de, (redrawlistptr)
+	ld a, (hl)
+	inc l
+	ld b, (hl)
+
+	ex de, hl
+	ld (hl), b
+	inc l
+	sub c
+	ld (hl), a
+	inc l
+	ex de, hl
+
+	pop hl
+	push hl
+	ld bc, ATTRIBS-collision_map
+	add hl, bc
+	ATTRIBSTOSCR h
+	ex de, hl
+	ld (hl), a
+	inc l
+	ld (hl), e
+	inc l
+	ld (hl), 0
+	ld (redrawlistptr), hl
+	pop hl
+	jr .notcrumblyr
+
+.eraser
+	xor a
+	ld (hl), a
+	push hl
+	ld de, (eraselistptr)
+	ld bc, ATTRIBS-collision_map
+	add hl, bc
+	ATTRIBSTOSCR h
+	ex de, hl
+	ld (hl), a
+	inc l
+	ld (hl), e
+	inc l
+	ld (hl), 0
+	ld (eraselistptr), hl
+	pop hl
+	;jr .notcrumblyr
+	dec l ; quicker than jumping over the INC L
+
+.oddongroundtime
+	inc l
+
+.notcrumblyr
 	; standing on a spiky platform, TODO
 
 	; check if nothing underneath willy
 	xor a
 	cp (hl)
-	inc hl ; deliberately avoid setting flags by using inc hl
+	dec hl ; deliberately avoid setting flags by using dec hl. dec here because check for crumbly platforms already did INC L
 	jp nz, movewilly
 	cp (hl)
 	jp nz, movewilly
@@ -4491,6 +4447,12 @@ movewilly:
 
 	; kill willy if fallen from a great height
 	ld a, (willy_airborne)
+	or a
+	jr z, .dontresetongroundtime
+	ld hl, ongroundtime
+	ld (hl), 0
+.dontresetongroundtime
+
 	cp #0C*2 ; set to this when we are about to fall to our death
 	jp c, .notdead		; fallen too far?
 	ld hl, willy_dead
@@ -4507,6 +4469,8 @@ movewilly:
 .notdead
 	xor a
 	ld (willy_airborne), a	; not airborne
+	ld hl, ongroundtime
+	inc (hl)
 
 	; conveyor stuff goes here
 
@@ -11268,7 +11232,9 @@ tokenise_buff BLOCK 64
 ; format of this list
 ; WORD gfx (big endian)
 ; WORD scraddress
-redrawcellslist	BLOCK 4*6+1
+redrawcellslist	BLOCK 4*8+1
+erasecellslist:
+	BLOCK 8*2+1 ; max 8 tiles behind or being stood on to be erased per frame
 
 jump50fps_tbl:
 	db -2, -2, -2, -2, -1, -2, -1, -2, -1, -1, -1, -1, 0, -1, 0, -1, 0, 0
@@ -11281,12 +11247,211 @@ JUMPTBLSIZE	EQU $-jump50fps_tbl
 sfx_jump	dw 0
 onrope		db 0
 willy_airborne	db 0
+ongroundtime	db 0
 willy_dead	db 0
 willystate	db 0
 ; willy left right movement table
 willyleftrightmovementtbl	db 0, 1, 0, 1, 1, 3, 1, 3, 2, 0, 2, 0, 0, 1, 2, 3
 kempston	db 0
 pausectr	db 0
+
+redrawlistptr	dw 0
+eraselistptr	dw 0
+
+parse_guardian_data:
+	ld ix, guardian0
+	xor a
+	ld (num_guardians), a
+	ld a, (hl) ; exit and guardian flags
+	ld b, a
+	bit HAS_VGUARDIAN_BIT, a
+	jr z, .novguardians
+
+	ld d, VGUARDIANPAGE/256
+	call get_guardian_type
+
+.morevguardiandata
+
+	call get_guardian_attribs
+
+	; (hl) = initial ypos
+	ld a, (hl)
+
+	ld (ix+GUARDIAN_DATA.vgy), a
+
+	; I shouldn't use exx here if I want to reserve that for bitstream data hmm
+	exx
+	ld e, a
+	and ~7
+	rrca
+	rrca
+
+	AROWX2TOSCRROWADDR
+
+	ld a, e
+	and 7
+	add h
+	ld h, a
+	exx
+
+	inc hl ; initial xpos and frame
+	ld a, (hl) ; add on xpos
+	and #3F ; mask out frame
+
+	exx
+	add l
+
+	ld (ix+GUARDIAN_DATA.scraddr), a
+	ld a, h
+	ld (ix+GUARDIAN_DATA.scraddr+1), a
+	exx
+
+	ld a, (hl)
+	and #C0 ; frame
+	rrca ; frame*32
+	ld (ix+GUARDIAN_DATA.frame), a
+
+	inc hl ; miny
+	ld a, (hl)
+	ld (ix+GUARDIAN_DATA.minaddr), a
+
+	inc hl ; maxy
+	ld a, (hl)
+	ld (ix+GUARDIAN_DATA.maxaddr), a
+
+	inc hl ; speed/flags
+	ld a, (hl)
+	and VGVELMASK ; mask out flags
+	REPT VGVELSHIFT
+	sra a
+	ENDR
+	ld (ix+GUARDIAN_DATA.yvel), a
+
+	ld a, (hl)
+	and VGFLAGSMASK
+	ld (ix+GUARDIAN_DATA.flags), a
+
+	call bump_guardian_ptr
+	jp z, .morevguardiandata
+
+.novguardians
+	bit HAS_HGUARDIAN_BIT, b
+	;jr z, .nohguardians
+	ret z
+
+	ld d, HGUARDIANPAGE/256
+	call get_guardian_type
+
+.morehguardiandata
+
+	call get_guardian_attribs
+
+	ld e, (hl)
+	inc hl ; xy and flags
+	ld a, (hl)
+	ld d, 0 ; flags
+	bit (ISHALFSPEEDBIT-8), a
+	jr z, .nothalfspeed
+	set HALFSPEEDFLAGBIT, d
+.nothalfspeed
+	bit (IS4FRAMEBIT-8), a
+	jr z, .not4frame
+	set IS4FRAMEFLAGBIT, d
+.not4frame
+	ld (ix+GUARDIAN_DATA.flags), d
+	and 7 ; mask out flags
+	ld d, a
+	push hl
+	ld hl, ATTRIBS
+	add hl, de
+
+
+	ATTRIBSTOSCR h
+	ld e, l
+	ld d, a ; bag scraddr
+	ld (ix+GUARDIAN_DATA.scraddr+1), a
+	ld a, l
+	ld (ix+GUARDIAN_DATA.scraddr), a
+
+	pop hl
+
+	ld a, (hl)
+	and HGFRAMEMASK
+	ld (ix+GUARDIAN_DATA.frame), a
+
+	inc hl ; path min
+	ld a, e
+	and ~31
+	ld e, a
+	ld a, (hl)
+	or e
+
+	ld (ix+GUARDIAN_DATA.minaddr), a
+
+	inc hl ; path max
+	ld a, e
+	and ~31
+	ld e, a
+	ld a, (hl)
+	or e
+
+	ld (ix+GUARDIAN_DATA.maxaddr), a
+
+	call bump_guardian_ptr
+	jp z, .morehguardiandata
+
+.nohguardians
+
+	ret
+
+; D: guardian base page
+get_guardian_type:
+	inc hl ; guardian type
+
+	ld a, (hl)
+	and #7F ; mask out is last flag
+	rra ; shift down one
+
+	ld e, 0
+	rr e ; carry in high bit
+	;add HGUARDIANPAGE/256
+	add d
+	ld d, a
+	ret
+
+; DE - guardian gfx (from get_guardian type call)
+get_guardian_attribs:
+	ld (ix+GUARDIAN_DATA.gfx), d ; high byte of guardian pointer
+	ld (ix+1+GUARDIAN_DATA.gfx), e ; low byte of guardian pointer
+
+	ex de, hl
+	ld hl, num_guardians
+	inc (hl)
+	ex de, hl
+
+	inc hl ; attrib
+	ld a, (hl)
+	ld c, a ; last one in high bit
+	and #7F ; mask out flag
+	ld (ix+GUARDIAN_DATA.attrib), a
+
+	inc hl
+	ret
+
+; set up pointer for reading next guardian data
+bump_guardian_ptr:
+	ld d, (ix+GUARDIAN_DATA.gfx) ; low byte of guardian pointer
+	ld e, (ix+1+GUARDIAN_DATA.gfx) ; highbyte of guardian pointer
+
+	push de
+	ld de, GUARDIAN_DATA
+	add ix, de
+	pop de
+
+	bit 7, c
+	ret
+
+	DISPLAY "parse_guardian_data size: ",/A, $-parse_guardian_data
 
 
 	DISPLAY "Gap before tbl_rows: ", /A, tbl_rows-$
@@ -11453,11 +11618,7 @@ add_pr_letterwidth:
 
 	DISPLAY "expand_measurepr_tokenised_string size: ", /A, $-expand_measurepr_tokenised_string
 
-erasecellslist:
-	BLOCK 6*2+1 ; max 6 tiles behind willy to be erased per frame
-
 jump_ctr		db 0
-;willy_jumping	db 0
 
 	DISPLAY "Gap before level_tiles: ", /A, level_tiles-$
 
@@ -13425,7 +13586,7 @@ The_Warehouse:
 	db 5|(4<<4)	; number of keys/key paper
 
 	IF !PACKED
-	XY 2, 3+16 ; willy start pos/facing
+	XY 1, 3+16 ; willy start pos/facing
 	db 29, 1 ; exit position
 	IPB 4, 1, 1 ; exit colour
 	db 2 ; border colour
